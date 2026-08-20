@@ -1,0 +1,64 @@
+{
+  "name": "starshine-sdk-js",
+  "version": "2.0.0-alpha.1",
+  "private": false,
+  "type": "module",
+  "description": "Post-quantum JavaScript SDK for Starshine storage, public audits, and VOID receipts.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VoidCommandCenter/starshine-sdk-js.git"
+  },
+  "homepage": "https://github.com/VoidCommandCenter/starshine-sdk-js",
+  "bugs": {
+    "url": "https://github.com/VoidCommandCenter/starshine-sdk-js/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "starshine": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "CHANGELOG.md",
+    "proto",
+    "examples",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "npm run build && tsx examples/hello.ts",
+    "example": "npm run start",
+    "cli": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/audit.test.ts src/identity.test.ts src/transport.test.ts src/void-sign.test.ts src/wire.test.ts",
+    "test:e2e": "tsx --test src/api.e2e.test.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@digitaldefiance/reed-solomon-erasure.wasm": "^1.0.2",
+    "@grpc/grpc-js": "^1.13.4",
+    "@grpc/proto-loader": "^0.7.15",
+    "@hpke/core": "^1.9.0",
+    "@hpke/hybridkem-x-wing": "^0.7.0",
+    "@mongodb-js/zstd": "^2.0.1",
+    "@noble/post-quantum": "^0.7.0",
+    "blake3-bao": "^1.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.13",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

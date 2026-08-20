@@ -1,0 +1,260 @@
+syntax = "proto3";
+
+package starshine.v2;
+
+// Target contract for partner onboarding. The current starshine.v1 service
+// remains available during migration. Server implementations MUST apply the
+// idempotency and authorization rules documented on each method.
+
+service System {
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}
+
+service Storage {
+  // Append an immutable event and persist its encrypted artifact. Reusing a
+  // request_id with an identical request_digest returns the original receipt;
+  // reusing it for different bytes returns ALREADY_EXISTS.
+  rpc Append(AppendRequest) returns (AppendResponse);
+  rpc Retrieve(RetrieveRequest) returns (RetrieveResponse);
+
+  // Release physical storage after an owner-authorized tombstone is appended.
+  // This never removes the event or its receipts from the ledger.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  rpc GetPublicArtifact(GetPublicArtifactRequest) returns (GetPublicArtifactResponse);
+  rpc ChallengeStorage(ChallengeStorageRequest) returns (ChallengeStorageResponse);
+}
+
+service Ledger {
+  rpc GetEvent(GetEventRequest) returns (GetEventResponse);
+  rpc ListAccountEvents(ListAccountEventsRequest) returns (ListAccountEventsResponse);
+  rpc GetInclusionProof(GetInclusionProofRequest) returns (GetInclusionProofResponse);
+}
+
+enum Operation {
+  OPERATION_UNSPECIFIED = 0;
+  OPERATION_APPEND = 1;
+  OPERATION_RETRIEVE = 2;
+  OPERATION_RELEASE = 3;
+  OPERATION_TRANSFER = 4;
+  OPERATION_FAUCET = 5;
+}
+
+enum ReceiptDisposition {
+  RECEIPT_DISPOSITION_UNSPECIFIED = 0;
+  RECEIPT_DISPOSITION_CREATED = 1;
+  RECEIPT_DISPOSITION_IDEMPOTENT_REPLAY = 2;
+}
+
+enum Finality {
+  FINALITY_UNSPECIFIED = 0;
+  // Initial onboarding: one node durably recorded and attested the event.
+  FINALITY_NODE_ATTESTED = 1;
+  // Future VOID network: event is included in a finalized checkpoint.
+  FINALITY_NETWORK_CHECKPOINTED = 2;
+}
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+  string protocol_version = 1;
+  repeated string pq_kem_suites = 2;
+  repeated string pq_signature_suites = 3;
+  bool authenticated_operations_required = 4;
+  bool idempotent_append = 5;
+  bool public_storage_proofs = 6;
+  bool owner_authorized_release = 7;
+  repeated Finality supported_finality = 8;
+  bytes node_id = 9;
+  bytes node_mldsa_public_key = 10;
+}
+
+// Canonical operation fields signed by the caller with ML-DSA-65. The signed
+// bytes are the ASCII domain "starshine:operation:v2\0" followed by RFC 8785
+// canonical JSON for fields 1-11 (byte strings are unpadded base64url).
+// Signature fields are excluded.
+message OperationAuthorization {
+  uint32 version = 1;
+  Operation operation = 2;
+  bytes actor_id = 3;
+  string request_id = 4;
+  string event_id = 5;
+  bytes artifact_root = 6;
+  string logical_content_id = 7;
+  bytes request_digest = 8;
+  uint64 max_void = 9;
+  uint64 issued_at_unix_ms = 10;
+  bytes nonce = 11;
+  bytes mldsa_public_key = 12;
+  bytes mldsa_signature = 13;
+}
+
+message SealedArtifact {
+  bytes artifact_root = 1;
+  bytes hpke_encapsulation = 2;
+  uint64 plaintext_len = 3;
+  uint64 hpke_plaintext_len = 4;
+  uint64 ciphertext_len = 5;
+  uint32 data_shards = 6;
+  uint32 parity_shards = 7;
+  uint64 sealed_shard_size = 8;
+  uint64 raw_shard_size = 9;
+  repeated bytes provider_ids = 10;
+  bytes ciphertext_digest = 11;
+  string compression_codec = 12;
+  repeated SealedShard shards = 13;
+}
+
+message SealedShard {
+  uint32 index = 1;
+  bytes global_bao_outboard = 2;
+  bytes sealed_data = 3;
+}
+
+message AppendRequest {
+  OperationAuthorization authorization = 1;
+  SealedArtifact artifact = 2;
+  string file_name = 3;
+}
+
+message AppendResponse {
+  EventReceipt receipt = 1;
+}
+
+message RetrieveRequest {
+  OperationAuthorization authorization = 1;
+  bytes artifact_root = 2;
+  bool minimum_shards = 3;
+}
+
+message RetrieveResponse {
+  SealedArtifact artifact = 1;
+  EventReceipt receipt = 2;
+}
+
+message ReleaseRequest {
+  OperationAuthorization authorization = 1;
+  bytes artifact_root = 2;
+  string reason = 3;
+}
+
+message ReleaseResponse {
+  EventReceipt receipt = 1;
+  bool physical_bytes_released = 2;
+}
+
+message EventReceipt {
+  string event_id = 1;
+  string request_id = 2;
+  bytes request_digest = 3;
+  Operation operation = 4;
+  bytes actor_id = 5;
+  bytes artifact_root = 6;
+  string logical_content_id = 7;
+  uint64 account_sequence = 8;
+  bytes previous_event_hash = 9;
+  bytes event_hash = 10;
+  uint64 accepted_at_unix_ms = 11;
+  uint64 void_amount = 12;
+  uint64 void_balance = 13;
+  ReceiptDisposition disposition = 14;
+  Finality finality = 15;
+  NodeAttestation node_attestation = 16;
+  InclusionProof inclusion_proof = 17;
+}
+
+message NodeAttestation {
+  bytes node_id = 1;
+  bytes mldsa_public_key = 2;
+  bytes mldsa_signature = 3;
+}
+
+message GetEventRequest {
+  string event_id = 1;
+}
+
+message GetEventResponse {
+  EventReceipt receipt = 1;
+}
+
+message ListAccountEventsRequest {
+  OperationAuthorization authorization = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListAccountEventsResponse {
+  repeated EventReceipt receipts = 1;
+  string next_cursor = 2;
+}
+
+message GetInclusionProofRequest {
+  string event_id = 1;
+}
+
+message GetInclusionProofResponse {
+  InclusionProof proof = 1;
+}
+
+message InclusionProof {
+  bytes checkpoint_root = 1;
+  uint64 checkpoint_height = 2;
+  repeated bytes merkle_path = 3;
+  bytes checkpoint_certificate = 4;
+  Finality finality = 5;
+}
+
+message PublicArtifact {
+  bytes artifact_root = 1;
+  uint64 plaintext_len = 2;
+  uint64 ciphertext_len = 3;
+  uint32 data_shards = 4;
+  uint32 parity_shards = 5;
+  uint64 sealed_shard_size = 6;
+  uint64 raw_shard_size = 7;
+  repeated bytes provider_ids = 8;
+  bytes ciphertext_digest = 9;
+  bytes owner_actor_id = 10;
+  bool released = 11;
+}
+
+message GetPublicArtifactRequest {
+  bytes artifact_root = 1;
+}
+
+message GetPublicArtifactResponse {
+  PublicArtifact artifact = 1;
+}
+
+message ChallengeStorageRequest {
+  bytes artifact_root = 1;
+  uint32 shard_index = 2;
+  uint64 epoch = 3;
+  bytes randomness = 4;
+}
+
+message StorageChallenge {
+  bytes artifact_root = 1;
+  uint32 shard_index = 2;
+  uint32 total_shards = 3;
+  uint64 epoch = 4;
+  bytes randomness = 5;
+  repeated uint32 block_indices = 6;
+  bytes file_id = 7;
+  bytes provider_id = 8;
+}
+
+message StorageAuditResponse {
+  uint32 index = 1;
+  bytes replica_block = 2;
+  bytes bao_slice = 3;
+}
+
+message StorageProof {
+  StorageChallenge challenge = 1;
+  repeated StorageAuditResponse responses = 2;
+}
+
+message ChallengeStorageResponse {
+  StorageProof proof = 1;
+}

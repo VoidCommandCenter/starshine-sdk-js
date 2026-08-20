@@ -1,0 +1,9 @@
+dist/
+node_modules/
+tmp/
+keys.json
+*.tgz
+*.log
+.DS_Store
+.env
+.env.*

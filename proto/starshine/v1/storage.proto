@@ -1,0 +1,221 @@
+syntax = "proto3";
+
+package starshine.v1;
+
+// Provider-side storage for Starshine v4 blobs. Cryptography is client-only;
+// the server never loads or holds ClientKeys.
+//
+// content_hash (top_root) is a commitment to a specific upload, including a fresh
+// HPKE encapsulation — identical plaintext bytes yield different hashes on each Put.
+// Use TLS and access control in production; Get returns enc_key and sealed provider shards.
+service Storage {
+  // Persist a client-built blob; returns the 32-byte BAO top_root (content hash).
+  rpc Put(PutRequest) returns (PutResponse);
+  // Fetch a stored blob by content hash (client decrypts locally).
+  rpc Get(GetRequest) returns (GetResponse);
+  // Delete a stored blob by content hash.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // Public PoRep-v2 proof-of-storage (no client secret).
+  // Metadata for auditors — excludes enc_key.
+  rpc GetPublicMeta(GetPublicMetaRequest) returns (GetPublicMetaResponse);
+  // Provider answers a PoS challenge for one stored shard (returns proof bundle).
+  rpc PosChallenge(PosChallengeRequest) returns (PosChallengeResponse);
+}
+
+message BlobMeta {
+  bytes top_root = 1;
+  bytes enc_key = 2;
+  uint64 plaintext_len = 3;
+  uint32 ciphertext_len = 4;
+  uint32 data_shards = 5;
+  uint32 parity_shards = 6;
+  uint32 sealed_shard_size = 7;
+  uint32 raw_shard_size = 8;
+  repeated bytes provider_ids = 9;
+  // BLAKE3 of RS-reconstructed ciphertext; client verifies after unsealing sealed shards.
+  bytes ciphertext_digest = 10;
+  // HPKE plaintext length when compression_codec is set (0 = use plaintext_len).
+  uint64 hpke_plaintext_len = 11;
+  // Compression applied before HPKE seal (e.g. "zstd"). Empty = legacy uncompressed.
+  string compression_codec = 12;
+}
+
+message ProviderShard {
+  uint32 index = 1;
+  reserved 2, 5;
+  reserved "shard_root", "merkle_path";
+  bytes outboard = 3;
+  bytes sealed_data = 4;
+}
+
+message PutRequest {
+  reserved 3;
+
+  BlobMeta meta = 1;
+  repeated ProviderShard shards = 2;
+  // Signed VOID max-debit. Empty = no ledger charge (CLI / unpaid Put).
+  VoidEnvelope envelope = 4;
+  string file_name = 5;
+  uint64 expected_void = 6;
+}
+
+message PutResponse {
+  bytes content_hash = 1;
+  VoidReceipt ledger = 2;
+}
+
+message GetRequest {
+  bytes content_hash = 1;
+  // Optional number of sealed shards to return. Zero returns all shards.
+  // For recovery, request at least BlobMeta.data_shards.
+  uint32 shard_count = 2;
+  // Return exactly BlobMeta.data_shards sealed shards. Overrides shard_count.
+  bool minimum_shards = 3;
+  VoidEnvelope envelope = 4;
+  string file_name = 5;
+}
+
+message GetResponse {
+  reserved 3;
+
+  BlobMeta meta = 1;
+  repeated ProviderShard shards = 2;
+  VoidReceipt ledger = 4;
+}
+
+message DeleteRequest {
+  bytes content_hash = 1;
+  VoidEnvelope envelope = 2;
+  string file_name = 3;
+}
+
+message DeleteResponse {
+  bytes content_hash = 1;
+  bool deleted = 2;
+  VoidReceipt ledger = 3;
+}
+
+// Public blob metadata for PoS auditors (no enc_key).
+message PublicBlobMeta {
+  bytes top_root = 1;
+  uint64 plaintext_len = 2;
+  uint32 ciphertext_len = 3;
+  uint32 data_shards = 4;
+  uint32 parity_shards = 5;
+  uint32 sealed_shard_size = 6;
+  uint32 raw_shard_size = 7;
+  repeated bytes provider_ids = 8;
+  bytes ciphertext_digest = 9;
+}
+
+message GetPublicMetaRequest {
+  bytes content_hash = 1;
+}
+
+message GetPublicMetaResponse {
+  PublicBlobMeta meta = 1;
+}
+
+message PosChallengeRequest {
+  bytes content_hash = 1;
+  uint32 shard_index = 2;
+  uint64 epoch = 3;
+  // 32-byte beacon; empty means all-zero (demo only).
+  bytes randomness = 4;
+}
+
+message PosChallenge {
+  bytes top_root = 1;
+  uint32 shard_index = 2;
+  uint32 total_shards = 3;
+  uint64 epoch = 4;
+  bytes randomness = 5;
+  repeated uint32 block_indices = 6;
+  bytes file_id = 7;
+  bytes provider_id = 8;
+}
+
+message PosAuditResponse {
+  uint32 index = 1;
+  bytes replica_block = 2;
+  bytes bao_slice = 3;
+}
+
+message PosProof {
+  PosChallenge challenge = 1;
+  repeated PosAuditResponse responses = 2;
+}
+
+message PosChallengeResponse {
+  PosProof proof = 1;
+}
+
+// --- VOID ledger (embedded redb on starshine-api) ---
+
+// ML-DSA-65 signed max-debit / faucet / transfer. Payload is reconstructed
+// and canonicalized on the server (same JSON key order as the web wallet).
+message VoidEnvelope {
+  uint32 v = 1;
+  string kind = 2;
+  string from_hpke = 3;
+  string to_hpke = 4;
+  uint64 amount = 5;
+  string content_hash = 6;
+  string nonce = 7;
+  string issued_at = 8;
+  string mldsa_public_key_hex = 9;
+  string signature_hex = 10;
+}
+
+message VoidReceipt {
+  uint64 balance = 1;
+  string tx_id = 2;
+  uint64 amount = 3;
+}
+
+message VoidTransaction {
+  string id = 1;
+  string kind = 2;
+  string status = 3;
+  string from_public_key = 4;
+  string to_public_key = 5;
+  uint64 amount = 6;
+  uint64 shard_bytes = 7;
+  string content_hash = 8;
+  string file_name = 9;
+  uint64 plaintext_bytes = 10;
+  string message = 11;
+  string created_at = 12;
+  string signature = 13;
+  string mldsa_public_key = 14;
+  string nonce = 15;
+  string payload_hash = 16;
+}
+
+message VoidAccount {
+  string public_key = 1;
+  uint64 balance = 2;
+  string created_at = 3;
+  uint64 faucet_amount = 4;
+  repeated VoidTransaction transactions = 5;
+}
+
+message GetAccountRequest {
+  string hpke_public_key = 1;
+}
+
+message ListTransactionsRequest {
+  uint32 limit = 1;
+}
+
+message ListTransactionsResponse {
+  repeated VoidTransaction transactions = 1;
+}
+
+service Void {
+  rpc GetAccount(GetAccountRequest) returns (VoidAccount);
+  rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse);
+  rpc Faucet(VoidEnvelope) returns (VoidAccount);
+  rpc Transfer(VoidEnvelope) returns (VoidAccount);
+}
