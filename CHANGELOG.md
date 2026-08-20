@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.0-alpha.2
+
+- Switch high-level storage operations to authenticated `starshine.v2` append/retrieve/release.
+- Add durable caller idempotency and an in-client sealed-artifact retry cache.
+- Verify ML-DSA-65 node receipts and per-account hash chains locally.
+- Add authenticated, wallet-scoped event history and owner-authorized physical release.
+- Add v2 capability discovery, public artifact metadata, and storage-proof RPCs.
+- Add a Rust/JavaScript cross-language integration test.
+
 ## 2.0.0-alpha.1
 
 - Require explicit opt-in for plaintext gRPC to non-loopback hosts.

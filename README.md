@@ -4,14 +4,14 @@ Post-quantum client-side sealing, resilient storage, public storage audits, and 
 
 The SDK keeps plaintext and private keys in the application process. Data is compressed, encrypted with hybrid X-Wing HPKE, Reed-Solomon encoded, replica-sealed, and committed with BAO before it reaches a storage node. Operations are authorized with ML-DSA-65.
 
-> v2 alpha: the SDK is compatible with the deployed `starshine.v1` storage service while the enforceable append/idempotency contract in [`proto/starshine/v2/starshine.proto`](./proto/starshine/v2/starshine.proto) is implemented by the Rust node. v1 receipts are node-local records, not signed node attestations or VOID network finality.
+> v2 alpha: authenticated append/retrieve/release, durable idempotency, scoped event history, owner enforcement, and ML-DSA node receipts are implemented in the SDK and the matching Rust node branch. `FINALITY_NODE_ATTESTED` is one-node durability, not future VOID network consensus.
 
 Requires Node.js 22 or newer.
 
 ## Install
 
 ```bash
-npm install github:VoidCommandCenter/starshine-sdk-js#v2.0.0-alpha.1
+npm install github:VoidCommandCenter/starshine-sdk-js#v2.0.0-alpha.2
 ```
 
 ## Connect securely
@@ -19,7 +19,7 @@ npm install github:VoidCommandCenter/starshine-sdk-js#v2.0.0-alpha.1
 Production endpoints must use TLS:
 
 ```ts
-import { Starshine } from "starshine-sdk-js";
+import { Starshine, createRequestId } from "starshine-sdk-js";
 
 const starshine = await Starshine.connect({
   server: "grpcs://starshine.example.com:443",
@@ -51,6 +51,7 @@ const plaintext = new TextEncoder().encode("hello starshine");
 const stored = await starshine.put(plaintext, {
   fileName: "hello.txt",
   contentNamespace: "my-application",
+  requestId: createRequestId(), // persist until the request succeeds
 });
 
 console.log(stored.logicalContentId); // stable for the same plaintext + namespace
@@ -58,6 +59,7 @@ console.log(stored.contentHash);      // unique encrypted artifact commitment
 
 const retrieved = await starshine.get(stored.contentHash);
 console.log(new TextDecoder().decode(retrieved.plaintext));
+console.log(stored.receipt.eventId);
 ```
 
 The two identities serve different purposes:
@@ -65,7 +67,7 @@ The two identities serve different purposes:
 - `logicalContentId` is stable and reveals equality when shared.
 - `contentHash` is the BAO root of one randomized encrypted upload.
 
-Use `createRequestId()` for a persistent retry key when calling a v2-capable node. The current v1 server does not enforce idempotency; the SDK never claims otherwise.
+Use `createRequestId()` for a persistent retry key. During the lifetime of a `Starshine` client, `put()` caches the already-sealed artifact under that ID so an ambiguous network failure can be retried without resealing or executing twice. For restart-safe workflows, persist the sealed `StoredBlob` and call `appendV2()` with the same request ID. Reusing an ID for different request bytes fails with `ALREADY_EXISTS`.
 
 ## Public proof of storage
 
@@ -80,13 +82,25 @@ console.log(audit.verified); // true or throws on an invalid proof
 console.log(audit.proof.challenge.providerId);
 ```
 
-Lower-level functions are also exported: `getPublicBlobMeta()`, `requestStorageProof()`, `deriveChallengeIndices()`, and `verifyStorageProof()`.
+Lower-level v2 functions are also exported: `getPublicArtifactV2()`, `requestStorageProofV2()`, `deriveChallengeIndices()`, and `verifyStorageProof()`.
 
 ## Release versus immutable history
 
-The legacy `delete()` method now always signs the destructive request. It should only be used against a node that enforces ownership.
+`delete()` is now a compatibility name for v2 `Release`: an ML-DSA-authorized owner may release physical storage, while the append-only event and signed receipt remain immutable. A different actor receives `PERMISSION_DENIED`.
 
-The v2 contract replaces deletion semantics with `Release`: an authorized owner may release physical storage, while the append-only event, receipt, and any checkpoint inclusion remain immutable. Full enforcement requires the matching Rust v2 node implementation.
+```ts
+const released = await starshine.delete(stored.contentHash, {
+  reason: "retention period ended",
+  logicalContentId: stored.logicalContentId,
+});
+console.log(released.physicalBytesReleased);
+```
+
+History is authenticated and scoped to the wallet:
+
+```ts
+const { receipts, nextCursor } = await starshine.events(100);
+```
 
 ## Wallet
 
@@ -126,14 +140,14 @@ npm run build
 The mutating public-node test is intentionally separate:
 
 ```bash
-STARSHINE_SERVER=grpc://host:port npm run test:e2e
+STARSHINE_E2E_SERVER=grpc://127.0.0.1:50051 npm run test:e2e
 ```
 
 ## Security boundaries
 
-- v1 has no server-enforced caller idempotency or append-only event API.
-- v1 storage ownership enforcement must be upgraded server-side before partner use.
-- v1 node-wide transaction listing can expose metadata and should not be enabled publicly.
+- The Rust node disables legacy v1 services by default. Enabling them is an explicit migration exception and restores their weaker semantics.
+- Exact append retries return the original signed receipt unchanged; they do not create a second event or store a second artifact.
+- Physical release is not event deletion. Event records and public non-secret artifact metadata remain.
 - `FINALITY_NODE_ATTESTED` means one node recorded an event. It is not future VOID network consensus.
 - Independent-provider sovereignty requires independently operated nodes; synthetic provider identifiers do not demonstrate it.
 

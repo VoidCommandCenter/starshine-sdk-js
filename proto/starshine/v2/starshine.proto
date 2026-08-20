@@ -38,11 +38,16 @@ enum Operation {
   OPERATION_RELEASE = 3;
   OPERATION_TRANSFER = 4;
   OPERATION_FAUCET = 5;
+  OPERATION_READ_EVENT = 6;
+  OPERATION_LIST_EVENTS = 7;
+  OPERATION_GET_INCLUSION_PROOF = 8;
 }
 
 enum ReceiptDisposition {
   RECEIPT_DISPOSITION_UNSPECIFIED = 0;
   RECEIPT_DISPOSITION_CREATED = 1;
+  // Reserved for future response wrappers. Exact retries currently return the
+  // byte-identical original CREATED receipt.
   RECEIPT_DISPOSITION_IDEMPOTENT_REPLAY = 2;
 }
 
@@ -170,7 +175,8 @@ message NodeAttestation {
 }
 
 message GetEventRequest {
-  string event_id = 1;
+  OperationAuthorization authorization = 1;
+  string event_id = 2;
 }
 
 message GetEventResponse {
@@ -189,7 +195,8 @@ message ListAccountEventsResponse {
 }
 
 message GetInclusionProofRequest {
-  string event_id = 1;
+  OperationAuthorization authorization = 1;
+  string event_id = 2;
 }
 
 message GetInclusionProofResponse {
@@ -214,7 +221,7 @@ message PublicArtifact {
   uint64 raw_shard_size = 7;
   repeated bytes provider_ids = 8;
   bytes ciphertext_digest = 9;
-  bytes owner_actor_id = 10;
+  reserved 10;
   bool released = 11;
 }
 
