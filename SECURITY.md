@@ -12,5 +12,6 @@ The latest tagged v2 prerelease is supported. The historical `starshine-js-api` 
 
 - Plaintext, HPKE private keys, PoRep secrets, and ML-DSA private keys remain client-side.
 - Non-loopback production endpoints must use TLS. Application-layer X-Wing HPKE and ML-DSA remain the post-quantum security boundary.
-- A v1 node-local receipt is not a signed node attestation, VOID consensus, or checkpoint finality.
+- A v2 `FINALITY_NODE_ATTESTED` receipt is ML-DSA-signed by one node. It is not VOID consensus or checkpoint finality.
+- Receipt verification establishes integrity and node-key identity. Production clients must authenticate or pin the expected node through TLS/capabilities.
 - Stable logical content IDs reveal equality when disclosed.

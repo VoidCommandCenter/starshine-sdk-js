@@ -15,21 +15,12 @@ import { getXWingKem } from "./kem.js";
 import { logicalContentId } from "./identity.js";
 import { loadKeysFromJson, type ClientKeys } from "./keys.js";
 import { aggregateStoredServedBytes, recoverWithProgress } from "./recovery.js";
-import {
-  deleteBlob,
-  getPublicBlobMeta,
-  getBlobResult,
-  putBlobResult,
-  requestStorageProof,
-} from "./remote.js";
 import { uploadWithProgress } from "./upload.js";
+import type { StoredBlob } from "./types.js";
 import {
-  envelopeToWire,
   faucet as voidFaucet,
   getAccount,
   listTransactions,
-  mapVoidError,
-  receiptFromWire,
   transfer as voidTransfer,
   type VoidAccount,
   type VoidReceipt,
@@ -51,6 +42,19 @@ import {
 } from "./wallet.js";
 import type { UnaryRequestOptions } from "./grpc.js";
 import { parseEndpoint, type TransportOptions } from "./transport.js";
+import {
+  appendV2,
+  getCapabilitiesV2,
+  getInclusionProofV2,
+  getPublicArtifactV2,
+  listAccountEventsV2,
+  releaseV2,
+  requestStorageProofV2,
+  retrieveV2,
+  type EventReceipt,
+  type InclusionProof,
+  type StarshineCapabilities,
+} from "./v2.js";
 
 export interface StarshineOptions {
   /** gRPC endpoint. Use `grpcs://` for every non-local production endpoint. */
@@ -62,15 +66,20 @@ export interface StarshineOptions {
   transport?: TransportOptions;
   /** Default unary RPC timeout. Individual calls may override it. */
   rpcTimeoutMs?: number;
+  /** Verify v2 capabilities and pin the node receipt key during connect. Default true. */
+  verifyCapabilities?: boolean;
 }
 
-export interface RequestOptions extends UnaryRequestOptions {}
+export interface RequestOptions extends UnaryRequestOptions {
+  /** Stable retry UUID. Persist and reuse it until the operation succeeds. */
+  requestId?: string;
+}
 
 export interface PutOptions extends RequestOptions {
   fileName?: string;
   /** Domain for the stable plaintext identity returned as `logicalContentId`. */
   contentNamespace?: string;
-  /** Charge VOID (default true). */
+  /** Legacy v1 compatibility option; v2 onboarding storage is currently zero-cost. */
   pay?: boolean;
   dataShards?: number;
   parityShards?: number;
@@ -78,16 +87,21 @@ export interface PutOptions extends RequestOptions {
 
 export interface GetOptions extends RequestOptions {
   fileName?: string;
-  /** Charge VOID (default true). */
+  /** Legacy v1 compatibility option; v2 onboarding storage is currently zero-cost. */
   pay?: boolean;
   /** Fetch only k data shards (cheaper VOID). Default true. */
   minimumShards?: boolean;
+  /** Optional stable identity to bind into the retrieve event. */
+  logicalContentId?: string;
 }
 
 export interface DeleteOptions extends RequestOptions {
   fileName?: string;
-  /** Retained for source compatibility. Delete authorization is always signed. */
+  /** Legacy v1 compatibility option; v2 Release authorization is always signed. */
   pay?: boolean;
+  reason?: string;
+  /** Optional stable identity to bind into the release event. */
+  logicalContentId?: string;
 }
 
 export interface AuditStorageOptions extends RequestOptions {
@@ -110,17 +124,24 @@ export interface PutResult {
   /** Per-upload encrypted artifact commitment. Fresh HPKE makes this unique. */
   contentHash: string;
   storedBytes: number;
+  receipt: EventReceipt;
+  /** Legacy v1 field. v2 storage operations return `receipt`. */
   ledger?: VoidReceipt;
 }
 
 export interface GetResult {
   plaintext: Uint8Array;
   servedBytes: number;
+  receipt: EventReceipt;
+  /** Legacy v1 field. v2 storage operations return `receipt`. */
   ledger?: VoidReceipt;
 }
 
 export interface DeleteResult {
   contentHash: string;
+  receipt: EventReceipt;
+  physicalBytesReleased: boolean;
+  /** Legacy v1 field. v2 storage operations return `receipt`. */
   ledger?: VoidReceipt;
 }
 
@@ -143,7 +164,8 @@ function parseHash(hash: string | Uint8Array): Uint8Array {
 }
 
 /**
- * JavaScript client for `starshine.v1.Storage` and `starshine.v1.Void`.
+ * JavaScript client for authenticated `starshine.v2` storage. Legacy VOID
+ * balance methods remain available only for nodes that explicitly enable v1.
  * Seals locally; the node never receives HPKE/PoRep/ML-DSA secrets.
  */
 export class Starshine {
@@ -154,6 +176,18 @@ export class Starshine {
   readonly rpcTimeoutMs: number;
   wallet: WalletFile;
   private clientKeys: ClientKeys | null = null;
+  private trustedNode?: { nodeId: Uint8Array; publicKey: Uint8Array };
+  private readonly sealedAppendCache = new Map<
+    string,
+    {
+      stored: StoredBlob;
+      logicalContentId: string;
+      fileName: string;
+      dataShards: number;
+      parityShards: number;
+      storedBytes: number;
+    }
+  >();
 
   private constructor(
     server: string,
@@ -189,7 +223,7 @@ export class Starshine {
     } else {
       wallet = await generateWallet();
     }
-    return new Starshine(
+    const starshine = new Starshine(
       server,
       wallet,
       dataShards,
@@ -197,6 +231,10 @@ export class Starshine {
       transport,
       rpcTimeoutMs,
     );
+    if (options.verifyCapabilities ?? true) {
+      await starshine.capabilities();
+    }
+    return starshine;
   }
 
   get hpkePublicKey(): string {
@@ -253,6 +291,46 @@ export class Starshine {
     );
   }
 
+  async capabilities(options: RequestOptions = {}): Promise<StarshineCapabilities> {
+    const capabilities = await getCapabilitiesV2(this.server, this.request(options));
+    this.trustedNode = {
+      nodeId: capabilities.nodeId,
+      publicKey: capabilities.nodeMlDsaPublicKey,
+    };
+    return capabilities;
+  }
+
+  async events(
+    limit = 100,
+    cursor = "",
+    options: RequestOptions = {},
+  ): Promise<{ receipts: EventReceipt[]; nextCursor: string }> {
+    return listAccountEventsV2(
+      this.server,
+      this.wallet,
+      limit,
+      cursor,
+      {
+        transport: this.transport,
+        rpc: this.request(options).rpc,
+        requestId: options.requestId,
+        expectedNode: this.trustedNode,
+      },
+    );
+  }
+
+  /** Available once the node advertises network-checkpoint finality. */
+  async inclusionProof(
+    eventId: string,
+    options: RequestOptions = {},
+  ): Promise<InclusionProof> {
+    return getInclusionProofV2(this.server, this.wallet, eventId, {
+      transport: this.transport,
+      rpc: this.request(options).rpc,
+      requestId: options.requestId,
+    });
+  }
+
   async faucet(options: RequestOptions = {}): Promise<VoidAccount> {
     return voidFaucet(
       this.server,
@@ -282,99 +360,116 @@ export class Starshine {
   }
 
   async put(data: Uint8Array, options: PutOptions = {}): Promise<PutResult> {
-    const pay = options.pay ?? true;
     const dataShards = options.dataShards ?? this.dataShards;
     const parityShards = options.parityShards ?? this.parityShards;
     const fileName = options.fileName ?? "blob.bin";
-    const keys = await this.keys();
-    const stored = await uploadWithProgress(keys, data, dataShards, parityShards);
-    const storedBytes = aggregateStoredServedBytes(stored);
-    const contentHash = bytesToHex(stored.meta.topRoot);
-    const envelope = pay
-      ? envelopeToWire(
-          this.sign("put", storedBytes, { contentHash }),
-        )
+    const logical = logicalContentId(data, options.contentNamespace);
+    let cached = options.requestId
+      ? this.sealedAppendCache.get(options.requestId)
       : undefined;
-    try {
-      const result = await putBlobResult(this.server, stored, {
-        envelope,
+    if (cached) {
+      if (
+        cached.logicalContentId !== logical ||
+        cached.fileName !== fileName ||
+        cached.dataShards !== dataShards ||
+        cached.parityShards !== parityShards
+      ) {
+        throw new Error(
+          "requestId is already bound to different append parameters in this client",
+        );
+      }
+    } else {
+      const keys = await this.keys();
+      const stored = await uploadWithProgress(keys, data, dataShards, parityShards);
+      cached = {
+        stored,
+        logicalContentId: logical,
         fileName,
-        expectedVoid: pay ? storedBytes : 0,
-        ...this.request(options),
-      });
-      return {
-        logicalContentId: logicalContentId(data, options.contentNamespace),
-        contentHash: bytesToHex(result.contentHash),
-        storedBytes,
-        ledger: receiptFromWire(result.ledger),
+        dataShards,
+        parityShards,
+        storedBytes: aggregateStoredServedBytes(stored),
       };
-    } catch (error) {
-      mapVoidError(error);
+      if (options.requestId) {
+        this.sealedAppendCache.set(options.requestId, cached);
+        if (this.sealedAppendCache.size > 128) {
+          const oldest = this.sealedAppendCache.keys().next().value;
+          if (oldest) this.sealedAppendCache.delete(oldest);
+        }
+      }
     }
+    const result = await appendV2(
+      this.server,
+      this.wallet,
+      cached.stored,
+      fileName,
+      logical,
+      {
+        transport: this.transport,
+        rpc: this.request(options).rpc,
+        requestId: options.requestId,
+        expectedNode: this.trustedNode,
+      },
+    );
+    return {
+      logicalContentId: logical,
+      contentHash: bytesToHex(result.artifactRoot),
+      storedBytes: cached.storedBytes,
+      receipt: result.receipt,
+    };
   }
 
   async get(hash: string | Uint8Array, options: GetOptions = {}): Promise<GetResult> {
-    const pay = options.pay ?? true;
     const minimumShards = options.minimumShards ?? true;
     const contentHash = parseHash(hash);
-    const hashHex = bytesToHex(contentHash);
     const keys = await this.keys();
-    let envelope;
-    if (pay) {
-      const account = await this.account(options);
-      if (account.balance <= 0) {
-        throw new Error("VOID balance is 0; call faucet() first");
-      }
-      envelope = envelopeToWire(
-        this.sign("get", account.balance, { contentHash: hashHex }),
-      );
-    }
-    try {
-      const fetched = await getBlobResult(this.server, contentHash, {
-        envelope,
-        fileName: options.fileName,
-        minimumShards,
-        ...this.request(options),
-      });
-      const plaintext = await recoverWithProgress(keys, fetched.stored);
-      return {
-        plaintext,
-        servedBytes: aggregateStoredServedBytes(fetched.stored),
-        ledger: receiptFromWire(fetched.ledger),
-      };
-    } catch (error) {
-      mapVoidError(error);
-    }
+    const fetched = await retrieveV2(
+      this.server,
+      this.wallet,
+      contentHash,
+      minimumShards,
+      {
+        transport: this.transport,
+        rpc: this.request(options).rpc,
+        requestId: options.requestId,
+        logicalContentId: options.logicalContentId,
+        expectedNode: this.trustedNode,
+      },
+    );
+    const plaintext = await recoverWithProgress(keys, fetched.stored);
+    return {
+      plaintext,
+      servedBytes: aggregateStoredServedBytes(fetched.stored),
+      receipt: fetched.receipt,
+    };
   }
 
   async delete(hash: string | Uint8Array, options: DeleteOptions = {}): Promise<DeleteResult> {
     const contentHash = parseHash(hash);
-    const hashHex = bytesToHex(contentHash);
-    // Authentication is not payment. Always sign destructive requests, including
-    // calls made against a node configured for zero-cost storage operations.
-    const envelope = envelopeToWire(
-      this.sign("delete", 0, { contentHash: hashHex }),
+    const result = await releaseV2(
+      this.server,
+      this.wallet,
+      contentHash,
+      options.reason ?? "owner requested release",
+      {
+        transport: this.transport,
+        rpc: this.request(options).rpc,
+        requestId: options.requestId,
+        logicalContentId: options.logicalContentId,
+        expectedNode: this.trustedNode,
+      },
     );
-    try {
-      const result = await deleteBlob(this.server, contentHash, {
-        envelope,
-        fileName: options.fileName,
-        ...this.request(options),
-      });
-      return {
-        contentHash: hashHex,
-        ledger: receiptFromWire(result.ledger),
-      };
-    } catch (error) {
-      mapVoidError(error);
-    }
+    return {
+      contentHash: bytesToHex(contentHash),
+      receipt: result.receipt,
+      physicalBytesReleased: result.physicalBytesReleased,
+    };
   }
 
   async publicMetadata(
     hash: string | Uint8Array,
     options: RequestOptions = {},
-  ): Promise<PublicBlobMeta> {
-    return getPublicBlobMeta(
+  ): Promise<PublicBlobMeta & { released: boolean }> {
+    return getPublicArtifactV2(
       this.server,
       parseHash(hash),
       this.request(options),
@@ -386,7 +481,7 @@ export class Starshine {
     options: AuditStorageOptions = {},
   ): Promise<AuditStorageResult> {
     const contentHash = parseHash(hash);
-    const meta = await getPublicBlobMeta(
+    const meta = await getPublicArtifactV2(
       this.server,
       contentHash,
       this.request(options),
@@ -399,7 +494,7 @@ export class Starshine {
     const epochInput = options.epoch ?? BigInt(Math.floor(Date.now() / 1_000));
     const epoch = typeof epochInput === "bigint" ? epochInput : BigInt(epochInput);
     const randomness = options.randomness ?? randomBytes(32);
-    const proof = await requestStorageProof(
+    const proof = await requestStorageProofV2(
       this.server,
       contentHash,
       shardIndex,

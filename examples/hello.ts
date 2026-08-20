@@ -1,14 +1,13 @@
 /**
- * Clone, npm install, npm start — talks to the public Railway node.
- *
- * Override the endpoint with STARSHINE_SERVER if you run your own starshine-api.
+ * Clone, npm install, then run a v2 Rust node on 127.0.0.1:50051 and `npm start`.
+ * Override the endpoint with STARSHINE_SERVER.
  */
 import { access } from "node:fs/promises";
 import { Starshine } from "starshine-sdk-js";
 
 const KEYS = "./keys.json";
 const SERVER =
-  process.env.STARSHINE_SERVER ?? "http://maglev.proxy.rlwy.net:27561";
+  process.env.STARSHINE_SERVER ?? "http://127.0.0.1:50051";
 
 async function fileExists(path: string): Promise<boolean> {
   try {
@@ -22,9 +21,6 @@ async function fileExists(path: string): Promise<boolean> {
 const ss = await Starshine.connect({
   server: SERVER,
   keys: (await fileExists(KEYS)) ? KEYS : undefined,
-  // The current Railway TCP proxy is legacy plaintext transport. Production
-  // partners should use a grpcs:// endpoint and omit this override.
-  transport: { allowInsecureRemote: true },
 });
 if (!(await fileExists(KEYS))) {
   await ss.saveWallet(KEYS);
@@ -34,13 +30,8 @@ if (!(await fileExists(KEYS))) {
 console.log("server ", SERVER);
 console.log("wallet ", ss.hpkePublicKey.slice(0, 16) + "…");
 
-let account = await ss.account();
-if (account.balance <= 0) {
-  account = await ss.faucet();
-  console.log("faucet ", account.balance, "VOID");
-} else {
-  console.log("balance", account.balance, "VOID");
-}
+const capabilities = await ss.capabilities();
+console.log("protocol", capabilities.protocolVersion);
 
 const plaintext = new TextEncoder().encode(
   `hello starshine ${new Date().toISOString()}`,
@@ -48,8 +39,10 @@ const plaintext = new TextEncoder().encode(
 const put = await ss.put(plaintext, { fileName: "hello.txt" });
 console.log("put    ", put.contentHash);
 console.log("content", put.logicalContentId);
-console.log("stored ", put.storedBytes, "bytes,", "VOID left", put.ledger?.balance);
+console.log("stored ", put.storedBytes, "bytes, event", put.receipt.eventId);
 
-const got = await ss.get(put.contentHash);
+const got = await ss.get(put.contentHash, {
+  logicalContentId: put.logicalContentId,
+});
 console.log("got    ", new TextDecoder().decode(got.plaintext));
-console.log("served ", got.servedBytes, "bytes,", "VOID left", got.ledger?.balance);
+console.log("served ", got.servedBytes, "bytes, event", got.receipt.eventId);
