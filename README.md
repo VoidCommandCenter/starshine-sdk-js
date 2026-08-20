@@ -11,7 +11,7 @@ Requires Node.js 22 or newer.
 ## Install
 
 ```bash
-npm install github:VoidCommandCenter/starshine-sdk-js
+npm install github:VoidCommandCenter/starshine-sdk-js#v2.0.0-alpha.1
 ```
 
 ## Connect securely
