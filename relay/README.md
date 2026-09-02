@@ -14,12 +14,20 @@ The relay is intentionally one application environment per deployment. Give deve
   "eventType": "assessment.completed",
   "occurredAt": "2026-09-01T16:00:00.000Z",
   "subject": { "type": "assessment", "id": "a-123" },
+  "privateReference": {
+    "kind": "assessment",
+    "externalId": "HN-1042",
+    "label": "Quarterly assessment 1042",
+    "aliases": ["renewal-1042"]
+  },
   "data": { "result": "passed" },
   "metadata": { "schemaVersion": 1 }
 }
 ```
 
 `sourceEventId` must be a stable UUID that is unique across the application ledger. It becomes the Starshine request ID, so redelivery is exactly-once at the ledger boundary. Reusing it for different envelope bytes is rejected as a conflict. The event payload must not contain plaintext secrets unless they are intended to be preserved inside the encrypted Starshine artifact.
+
+`privateReference` is optional. It gives an authenticated application a human-readable lookup key without publishing that key in VOIDSCAN. The normalized reference is part of the canonical envelope, so it is X-Wing-encrypted in Starshine, covered by the artifact commitment, and AES-256-GCM-encrypted in the local durable outbox. It is immutable under the event's idempotency key. Avoid putting unnecessary personal data in labels or aliases.
 
 HTTP endpoints:
 
@@ -28,6 +36,15 @@ HTTP endpoints:
 - `GET /healthz` is unauthenticated for container probes.
 
 Every other HTTP endpoint requires `Authorization: Bearer …` when a token file is configured. A non-loopback listener refuses to start without that file.
+
+## Private reference search
+
+Application backends can resolve a private human reference to its Starshine event and public proof using bearer-authenticated endpoints:
+
+- `GET /v1/references?query=HN-1042&limit=25` — case-insensitive search across external ID, label, kind, aliases, source event ID, and completed Starshine event ID.
+- `GET /v1/references/{sourceEventId}` — exact reference lookup by the application's stable UUID.
+
+Completed matches include `eventId`, `ledgerId`, and a `publicProofPath` such as `/scan?event=…`. That path opens the public proof directly, but the private label never appears in the path or public response. Keep the relay bearer token in a trusted application backend; do not embed it in a browser or public client. Events submitted before `privateReference` was supplied remain commitment-searchable in VOIDSCAN but have no human-reference match.
 
 ## Public VOIDSCAN
 

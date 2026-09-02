@@ -3,7 +3,11 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import path from "node:path";
 
 import type { SerializedStoredBlob } from "./codec.js";
-import { canonicalEventBytes, type RelayEventEnvelope } from "./schema.js";
+import {
+  canonicalEventBytes,
+  type RelayEventEnvelope,
+  type RelayPrivateReference,
+} from "./schema.js";
 
 export class IdempotencyConflictError extends Error {}
 
@@ -24,10 +28,23 @@ export interface LocatedRecord {
   value?: unknown;
 }
 
+export interface PrivateReferenceMatch {
+  sourceEventId: string;
+  sourceSystem: string;
+  eventType: string;
+  occurredAt: string;
+  acceptedAt: string;
+  status: Exclude<RelayStatus, "missing">;
+  reference: RelayPrivateReference;
+  eventId?: string;
+  ledgerId?: string;
+}
+
 export class DurableOutbox {
   readonly root: string;
   private readonly encryptionKey: Uint8Array;
   private readonly directories: Record<Exclude<RelayStatus, "missing">, string>;
+  private readonly referenceIndex = new Map<string, PrivateReferenceMatch>();
 
   constructor(root: string, encryptionKey: Uint8Array) {
     if (encryptionKey.length !== 32) {
@@ -62,6 +79,7 @@ export class DurableOutbox {
         );
       }
     }
+    await this.rebuildReferenceIndex();
   }
 
   async enqueue(envelope: RelayEventEnvelope): Promise<LocatedRecord> {
@@ -89,6 +107,7 @@ export class DurableOutbox {
     const destination = this.file("pending", envelope.sourceEventId);
     try {
       await durableCreate(destination, this.encrypt(record, envelope.sourceEventId));
+      this.indexReference("pending", record);
       return { status: "pending", value: record };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
@@ -115,6 +134,7 @@ export class DurableOutbox {
       if (record.nextAttemptAt && Date.parse(record.nextAttemptAt) > Date.now()) continue;
       try {
         await rename(pending, processing);
+        this.indexReference("processing", record);
         return record;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
@@ -137,23 +157,23 @@ export class DurableOutbox {
       this.file("processing", record.envelope.sourceEventId),
       this.file("pending", record.envelope.sourceEventId),
     );
+    this.indexReference("pending", record);
   }
 
   async complete(record: RelayRecord, result: unknown): Promise<void> {
+    const completed = {
+      envelope: record.envelope,
+      acceptedAt: record.acceptedAt,
+      completedAt: new Date().toISOString(),
+      attempts: record.attempts,
+      result,
+    };
     await atomicReplace(
       this.file("complete", record.envelope.sourceEventId),
-      this.encrypt(
-        {
-          envelope: record.envelope,
-          acceptedAt: record.acceptedAt,
-          completedAt: new Date().toISOString(),
-          attempts: record.attempts,
-          result,
-        },
-        record.envelope.sourceEventId,
-      ),
+      this.encrypt(completed, record.envelope.sourceEventId),
     );
     await unlink(this.file("processing", record.envelope.sourceEventId));
+    this.indexReference("complete", completed);
   }
 
   async dead(record: RelayRecord): Promise<void> {
@@ -162,6 +182,7 @@ export class DurableOutbox {
       this.file("processing", record.envelope.sourceEventId),
       this.file("dead", record.envelope.sourceEventId),
     );
+    this.indexReference("dead", record);
   }
 
   async locate(id: string): Promise<LocatedRecord> {
@@ -175,6 +196,35 @@ export class DurableOutbox {
       }
     }
     return { status: "missing" };
+  }
+
+  privateReference(id: string): PrivateReferenceMatch | undefined {
+    const match = this.referenceIndex.get(id);
+    return match ? structuredClone(match) : undefined;
+  }
+
+  searchPrivateReferences(query: string, limit: number): PrivateReferenceMatch[] {
+    const needle = searchable(query);
+    if (!needle) return [];
+    const ranked: Array<{ match: PrivateReferenceMatch; score: number }> = [];
+    for (const match of this.referenceIndex.values()) {
+      const values = [
+        match.reference.externalId,
+        match.reference.label,
+        match.reference.kind,
+        ...match.reference.aliases,
+        match.sourceEventId,
+        match.eventId ?? "",
+      ].map(searchable);
+      const score = referenceScore(needle, values);
+      if (score !== undefined) ranked.push({ match, score });
+    }
+    ranked.sort((left, right) =>
+      left.score - right.score ||
+      right.match.acceptedAt.localeCompare(left.match.acceptedAt) ||
+      left.match.sourceEventId.localeCompare(right.match.sourceEventId)
+    );
+    return ranked.slice(0, limit).map(({ match }) => structuredClone(match));
   }
 
   private file(status: Exclude<RelayStatus, "missing">, id: string): string {
@@ -228,6 +278,61 @@ export class DurableOutbox {
     ]);
     return JSON.parse(plaintext.toString("utf8")) as unknown;
   }
+
+  private async rebuildReferenceIndex(): Promise<void> {
+    this.referenceIndex.clear();
+    for (const status of ["pending", "processing", "dead", "complete"] as const) {
+      for (const file of await readdir(this.directories[status])) {
+        if (!file.endsWith(".json")) continue;
+        const sourceEventId = file.slice(0, -5);
+        const value = this.decrypt(
+          await readFile(path.join(this.directories[status], file)),
+          sourceEventId,
+        );
+        this.indexReference(status, value);
+      }
+    }
+  }
+
+  private indexReference(
+    status: Exclude<RelayStatus, "missing">,
+    value: unknown,
+  ): void {
+    if (!isRecord(value) || !isRecord(value.envelope)) return;
+    const envelope = value.envelope as unknown as RelayEventEnvelope;
+    if (!envelope.privateReference) return;
+    const receipt = isRecord(value.result) && isRecord(value.result.receipt)
+      ? value.result.receipt
+      : undefined;
+    this.referenceIndex.set(envelope.sourceEventId, {
+      sourceEventId: envelope.sourceEventId,
+      sourceSystem: envelope.sourceSystem,
+      eventType: envelope.eventType,
+      occurredAt: envelope.occurredAt,
+      acceptedAt: typeof value.acceptedAt === "string" ? value.acceptedAt : envelope.occurredAt,
+      status,
+      reference: structuredClone(envelope.privateReference),
+      eventId: typeof receipt?.eventId === "string" ? receipt.eventId : undefined,
+      ledgerId: typeof receipt?.ledgerId === "string" ? receipt.ledgerId : undefined,
+    });
+  }
+}
+
+function searchable(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase("en-US").trim();
+}
+
+function referenceScore(needle: string, values: string[]): number | undefined {
+  if (values[0] === needle) return 0;
+  if (values.some((value) => value === needle)) return 1;
+  if (values.some((value) => value.startsWith(needle))) return 2;
+  const tokens = needle.split(/\s+/).filter(Boolean);
+  const haystack = values.join(" ");
+  return tokens.every((token) => haystack.includes(token)) ? 3 : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 async function durableCreate(destination: string, contents: string): Promise<void> {
