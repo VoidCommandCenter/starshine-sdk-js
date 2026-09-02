@@ -48,6 +48,24 @@ spec:
               value: {{ .Values.outbox.maxAttempts | quote }}
             - name: STARSHINE_RELAY_RETRY_BASE_MS
               value: {{ .Values.outbox.retryBaseMs | quote }}
+            - name: STARSHINE_GATEWAY_ENABLED
+              value: {{ .Values.gateway.enabled | quote }}
+            - name: STARSHINE_GATEWAY_MAX_CHUNK_BYTES
+              value: {{ .Values.gateway.maxChunkBytes | quote }}
+            - name: STARSHINE_GATEWAY_MAX_FILE_BYTES
+              value: {{ .Values.gateway.maxFileBytes | quote }}
+            - name: STARSHINE_GATEWAY_MAX_CHUNKS
+              value: {{ .Values.gateway.maxChunks | quote }}
+            - name: STARSHINE_GATEWAY_MAX_JSON_BYTES
+              value: {{ .Values.gateway.maxJsonBytes | quote }}
+            - name: STARSHINE_GATEWAY_CAPABILITY_TTL_SECONDS
+              value: {{ .Values.gateway.capabilityTtlSeconds | quote }}
+            - name: STARSHINE_GATEWAY_ALLOWED_SHARD_POLICIES
+              value: {{ .Values.gateway.allowedShardPolicies | quote }}
+            - name: STARSHINE_GATEWAY_ALLOWED_ORIGINS
+              value: {{ .Values.gateway.allowedOrigins | quote }}
+            - name: STARSHINE_GATEWAY_DEFAULT_ROUTE_ID
+              value: {{ .Values.gateway.defaultRouteId | quote }}
             {{- if .Values.amqp.enabled }}
             - name: STARSHINE_RELAY_AMQP_URL
               valueFrom:

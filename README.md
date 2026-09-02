@@ -115,6 +115,56 @@ const proof = await starshine.inclusionProof(ledgerPage.receipts[0].eventId);
 
 Each deployment receives a permanent opaque `ledgerId`; use distinct IDs for development, staging, and production. Ledger IDs delineate histories and authorization even though their commitments share a global VOID checkpoint.
 
+## Application file gateway
+
+`FileGatewayClient` integrates an existing application without putting a Starshine wallet or
+storage credential in that application's repository. It supports both protection paths:
+
+- `gateway-sealed`: upload bounded plaintext chunks over HTTPS; the Void relay X-Wing-seals each
+  chunk immediately and never writes plaintext to disk.
+- `client-sealed`: seal chunks locally with this SDK and send only validated serialized
+  `StoredBlob` artifacts. The relay never receives the plaintext or recovery key.
+
+```ts
+import { FileGatewayClient } from "starshine-sdk-js";
+
+const files = new FileGatewayClient({
+  baseUrl: "https://relay.example.com",
+  authorization: `VoidCapability ${shortLivedCapability}`,
+});
+
+const upload = await files.createUpload({
+  sourceSystem: "my-application",
+  mode: "gateway-sealed",
+  fileName: "evidence.pdf",
+  contentType: "application/pdf",
+  byteLength: fileChunk.length,
+  privateReference: {
+    kind: "evidence",
+    externalId: "CASE-1042",
+    label: "Quarterly control evidence",
+    aliases: ["renewal-2026"],
+  },
+  shardPolicy: { dataShards: 4, parityShards: 2 },
+});
+
+await files.uploadGatewayChunk(upload.uploadId, 0, fileChunk);
+const completed = await files.completeUpload(upload.uploadId);
+console.log(completed.manifest?.publicProofPath);
+```
+
+Labels, external IDs, aliases, file metadata, and application audit context are private: they are
+encrypted in the relay catalog and in the sealed manifest, while VOIDSCAN exposes only proof
+commitments. `search()` resolves those human labels through an authenticated endpoint. Calls to
+`recordAction()` use the exported, closed `FILE_AUDIT_EVENT_TYPES` vocabulary for views,
+downloads, shares, permission changes, deletes, and other application actions.
+
+Short-lived file capabilities are HMAC-SHA-256 authenticated and tenant/scope/upload bound. The
+trusted application backend mints them only after applying its existing authentication and access
+policy. For `client-sealed` data, that application must also distribute the appropriate recovery
+key to authorized recipients; a gateway capability authorizes retrieval of ciphertext but does
+not grant decryption by itself.
+
 ## Wallet
 
 ```ts
@@ -172,4 +222,8 @@ npm run test:e2e
 - `NodeAttested` means one node recorded an event. `LedgerCheckpointed` adds verifiable shared-ledger inclusion. Neither is future distributed VOID consensus (`NetworkFinalized`).
 - Independent-provider sovereignty requires independently operated nodes; synthetic provider identifiers do not demonstrate it.
 
-The implemented contract is in [`docs/PROTOCOL_V2.md`](./docs/PROTOCOL_V2.md), operator provisioning is in [`docs/OPERATIONS.md`](./docs/OPERATIONS.md), and the relay handoff is in [`relay/README.md`](./relay/README.md). The Starshine and VOID whitepapers remain architectural guides rather than frozen implementation specifications.
+The implemented contracts are in [`docs/PROTOCOL_V2.md`](./docs/PROTOCOL_V2.md) and
+[`docs/FILE_GATEWAY.md`](./docs/FILE_GATEWAY.md), operator provisioning is in
+[`docs/OPERATIONS.md`](./docs/OPERATIONS.md), and the relay handoff is in
+[`relay/README.md`](./relay/README.md). The Starshine and VOID whitepapers remain architectural
+guides rather than frozen implementation specifications.

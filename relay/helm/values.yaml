@@ -16,6 +16,17 @@ http:
   port: 8787
   bearerTokenSecretKey: bearer-token
 
+gateway:
+  enabled: false
+  maxChunkBytes: 8388608
+  maxFileBytes: 1073741824
+  maxChunks: 10000
+  maxJsonBytes: 134217728
+  capabilityTtlSeconds: 900
+  allowedShardPolicies: "4+2"
+  allowedOrigins: ""
+  defaultRouteId: void-primary
+
 amqp:
   enabled: false
   existingSecret: starshine-relay-secrets

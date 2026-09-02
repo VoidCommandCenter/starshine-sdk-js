@@ -46,6 +46,35 @@ Application backends can resolve a private human reference to its Starshine even
 
 Completed matches include `eventId`, `ledgerId`, and a `publicProofPath` such as `/scan?event=…`. That path opens the public proof directly, but the private label never appears in the path or public response. Keep the relay bearer token in a trusted application backend; do not embed it in a browser or public client. Events submitted before `privateReference` was supplied remain commitment-searchable in VOIDSCAN but have no human-reference match.
 
+## File-protection gateway
+
+Set `STARSHINE_GATEWAY_ENABLED=true` to add the versioned, chunked file boundary. The relay
+supports server-side `gateway-sealed` uploads and opaque `client-sealed` uploads produced by the
+JavaScript SDK. Its encrypted private catalog makes file names, labels, external IDs, and aliases
+searchable to an authorized tenant without exposing them in VOIDSCAN.
+
+- `POST /v1/capabilities` — service-bearer-only minting of a short-lived, scoped capability.
+- `POST /v1/files/uploads` — create an idempotent upload session and private label.
+- `PUT /v1/files/uploads/{uploadId}/chunks/{index}` — submit one exact-size binary or sealed chunk.
+- `POST /v1/files/uploads/{uploadId}/complete` — ledger a sealed manifest and `file.uploaded` audit event.
+- `GET /v1/files/uploads/{uploadId}` — private metadata, artifact IDs, and proof links.
+- `GET /v1/files/uploads/{uploadId}/chunks/{index}` — ledger a technical retrieve and return plaintext or sealed bytes according to the mode.
+- `POST /v1/files/uploads/{uploadId}/actions` — ledger a semantic application action.
+- `GET /v1/files?query=…` — tenant-scoped search across label, external ID, aliases, file name, upload ID, and manifest event ID.
+
+The service bearer is for a trusted backend. Browser-facing calls use `Authorization:
+VoidCapability …`; capabilities are tenant-, scope-, expiry-, and optionally upload-bound. Hyper
+Nimbus or another application remains responsible for deciding who may receive a capability.
+Semantic reads such as `file.viewed` and `file.downloaded` must be sent by the application because
+a chunk retrieval alone cannot tell whether the bytes were previewed, downloaded, or processed by
+a background job.
+
+The initial action vocabulary is `file.created`, `file.uploaded`, `file.viewed`, `file.previewed`,
+`file.downloaded`, `file.exported`, `file.updated`, `file.version-created`, `file.renamed`,
+`file.moved`, `file.shared`, `file.unshared`, `file.deleted`, `file.released`, `access.requested`,
+`access.granted`, `access.denied`, `access.revoked`, `permission.changed`, `record.approved`,
+`record.rejected`, and `record.status-changed`.
+
 ## Public VOIDSCAN
 
 The relay can publish a metadata-only, read-only proof explorer without exposing its bearer-protected ingestion API. Set `STARSHINE_RELAY_SCAN_ENABLED=true`, then open `/scan` on the relay hostname. The versioned public API is:
@@ -76,6 +105,39 @@ Recommended:
 - `STARSHINE_RELAY_DATA_DIR`, default `/var/lib/starshine-relay`; this must be persistent storage
 - `STARSHINE_RELAY_HOST`, default `127.0.0.1`
 - `STARSHINE_RELAY_PORT`, default `8787`
+- `STARSHINE_GATEWAY_ENABLED`, default `false`
+- `STARSHINE_GATEWAY_MAX_CHUNK_BYTES`, default `8388608` (8 MiB)
+- `STARSHINE_GATEWAY_MAX_FILE_BYTES`, default `1073741824` (1 GiB)
+- `STARSHINE_GATEWAY_MAX_CHUNKS`, default `10000`
+- `STARSHINE_GATEWAY_MAX_JSON_BYTES`, default `134217728`; sealed JSON is larger than plaintext
+- `STARSHINE_GATEWAY_ALLOWED_SHARD_POLICIES`, comma-separated and defaulting to the relay's configured `k+m`
+- `STARSHINE_GATEWAY_CAPABILITY_TTL_SECONDS`, default `900`, maximum `3600`
+- `STARSHINE_GATEWAY_ALLOWED_ORIGINS`, exact comma-separated HTTPS origins for browser calls
+- `STARSHINE_GATEWAY_DEFAULT_ROUTE_ID`, default `void-primary`
+- `STARSHINE_GATEWAY_ROUTES_FILE`, optional mode-`0600` route document for separately provisioned Starshine nodes
+
+The built-in `void-primary` route uses the relay's current Starshine node, wallet, ledger, and
+Backblaze-backed storage and truthfully reports one storage failure domain. A route file uses this
+shape:
+
+```json
+{
+  "version": "void.gateway-routes.v1",
+  "routes": [{
+    "id": "customer-primary",
+    "server": "grpcs://customer-node.example:443",
+    "ledgerId": "018f9f4c-4c83-7f1d-8e5d-e0d646f48d8a",
+    "walletFile": "/run/secrets/customer.wallet.json",
+    "serverCaFile": "/run/secrets/customer-ca.pem",
+    "failureDomains": 1
+  }]
+}
+```
+
+Adding a route does not move existing artifacts. A customer-specific route becomes active only
+after its scoped node/storage credentials are provisioned and tested. Reed-Solomon `k+m` is
+adjustable independently from placement; multiple logical shards in one Backblaze bucket are
+still one failure domain.
 
 RabbitMQ is enabled when both `STARSHINE_RELAY_AMQP_URL` and `STARSHINE_RELAY_AMQP_QUEUE` are present. Use an `amqps://` URL in production. Messages are acknowledged only after the normalized envelope is on the durable outbox.
 

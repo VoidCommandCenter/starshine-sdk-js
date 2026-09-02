@@ -45,7 +45,7 @@
     "example": "npm run start",
     "cli": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/audit.test.ts src/identity.test.ts src/transport.test.ts src/v2.test.ts src/void-sign.test.ts src/wire.test.ts",
+    "test": "tsx --test src/audit.test.ts src/file-gateway.test.ts src/identity.test.ts src/serialized.test.ts src/transport.test.ts src/v2.test.ts src/void-sign.test.ts src/wire.test.ts",
     "test:e2e": "tsx --test src/api.e2e.test.ts",
     "prepack": "npm run build"
   },

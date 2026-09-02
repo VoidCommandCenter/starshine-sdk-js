@@ -9,11 +9,15 @@ import {
   type EventReceipt,
   type WalletFile,
 } from "starshine-sdk-js";
+import { readFile, stat } from "node:fs/promises";
 
 import { startAmqpConsumer } from "./amqp.js";
 import { deserializeStoredBlob, jsonForStorage, serializeStoredBlob } from "./codec.js";
 import { loadConfig, type RelayConfig } from "./config.js";
 import { createRelayHttpServer } from "./http.js";
+import { FileCapabilityAuthority } from "./capability.js";
+import { FileCatalog } from "./file_catalog.js";
+import { FileGateway, gatewayOptions, type GatewayRoute } from "./file_gateway.js";
 import { DurableOutbox } from "./outbox.js";
 import { StarshinePublicScan } from "./scan.js";
 import { canonicalEventBytes } from "./schema.js";
@@ -33,10 +37,29 @@ const expectedNode = {
 const publicScan = config.scanEnabled
   ? new StarshinePublicScan(config, wallet, expectedNode)
   : undefined;
+const fileCatalog = config.gatewayEnabled
+  ? new FileCatalog(config.dataDir, config.outboxKey)
+  : undefined;
+if (fileCatalog) await fileCatalog.initialize();
+const gatewayRoutes = config.gatewayEnabled
+  ? await loadGatewayRoutes(config, wallet, keys, expectedNode)
+  : undefined;
+const fileGateway = fileCatalog && gatewayRoutes
+  ? new FileGateway(gatewayOptions(config), fileCatalog, outbox, gatewayRoutes)
+  : undefined;
+const capabilityAuthority = config.gatewayEnabled
+  ? new FileCapabilityAuthority(config.outboxKey, config.gatewayCapabilityTtlSeconds)
+  : undefined;
 
 let stopping = false;
 const worker = runWorker(config, outbox, wallet, keys, expectedNode);
-const http = createRelayHttpServer(config, outbox, publicScan);
+const http = createRelayHttpServer(
+  config,
+  outbox,
+  publicScan,
+  fileGateway,
+  capabilityAuthority,
+);
 await new Promise<void>((resolve, reject) => {
   http.once("error", reject);
   http.listen(config.port, config.host, () => resolve());
@@ -51,6 +74,8 @@ console.log(JSON.stringify({
   nodeId: Buffer.from(capabilities.nodeId).toString("hex"),
   amqp: Boolean(amqp),
   publicScan: config.scanEnabled,
+  fileGateway: config.gatewayEnabled,
+  gatewayRoutes: gatewayRoutes ? [...gatewayRoutes.keys()] : [],
 }));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -137,4 +162,86 @@ function safeFilePart(value: string): string {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function loadGatewayRoutes(
+  relayConfig: RelayConfig,
+  primaryWallet: WalletFile,
+  primaryKeys: Awaited<ReturnType<typeof loadKeysFromJson>>,
+  primaryNode: { nodeId: Uint8Array; publicKey: Uint8Array },
+): Promise<ReadonlyMap<string, GatewayRoute>> {
+  const routes = new Map<string, GatewayRoute>();
+  routes.set("void-primary", {
+    id: "void-primary",
+    server: relayConfig.server,
+    ledgerId: relayConfig.ledgerId,
+    wallet: primaryWallet,
+    keys: primaryKeys,
+    expectedNode: primaryNode,
+    transport: serverTransport(relayConfig),
+    failureDomains: 1,
+  });
+  if (!relayConfig.gatewayRoutesFile) return routes;
+  const details = await stat(relayConfig.gatewayRoutesFile);
+  if (process.platform !== "win32" && (details.mode & 0o077) !== 0) {
+    throw new Error("STARSHINE_GATEWAY_ROUTES_FILE must not be readable by group or other users");
+  }
+  const document = JSON.parse(await readFile(relayConfig.gatewayRoutesFile, "utf8")) as unknown;
+  if (!isRecord(document) || document.version !== "void.gateway-routes.v1" || !Array.isArray(document.routes)) {
+    throw new Error("invalid gateway routes document");
+  }
+  for (const value of document.routes) {
+    if (!isRecord(value)) throw new Error("gateway route must be an object");
+    const id = routeString(value.id, "id", 64);
+    if (id === "void-primary" || routes.has(id)) throw new Error(`duplicate gateway route ${id}`);
+    const server = routeString(value.server, "server", 1024);
+    const ledgerId = routeString(value.ledgerId, "ledgerId", 64);
+    const walletFile = routeString(value.walletFile, "walletFile", 4096);
+    const serverCaFile = value.serverCaFile === undefined
+      ? undefined
+      : routeString(value.serverCaFile, "serverCaFile", 4096);
+    const serverCa = serverCaFile ? new Uint8Array(await readFile(serverCaFile)) : undefined;
+    const routeWallet = await loadWallet(walletFile);
+    const routeKeys = await loadKeysFromJson(routeWallet, getXWingKem());
+    const routeCapabilities = await getCapabilitiesV2(server, {
+      transport: serverCa ? { rootCertificates: serverCa } : undefined,
+    });
+    routes.set(id, {
+      id,
+      server,
+      ledgerId,
+      wallet: routeWallet,
+      keys: routeKeys,
+      expectedNode: {
+        nodeId: routeCapabilities.nodeId,
+        publicKey: routeCapabilities.nodeMlDsaPublicKey,
+      },
+      transport: serverCa ? { rootCertificates: serverCa } : undefined,
+      failureDomains: routeInteger(value.failureDomains, "failureDomains", 1, 255),
+    });
+  }
+  return routes;
+}
+
+function routeString(value: unknown, name: string, maximum: number): string {
+  if (typeof value !== "string" || !value.trim() || value.length > maximum) {
+    throw new Error(`gateway route ${name} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function routeInteger(
+  value: unknown,
+  name: string,
+  minimum: number,
+  maximum: number,
+): number {
+  if (!Number.isInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new Error(`gateway route ${name} must be between ${minimum} and ${maximum}`);
+  }
+  return value as number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add the opt-in Void file-protection gateway with chunked `gateway-sealed` and `client-sealed` uploads, encrypted private manifests, deterministic append retries, and signed retrieval receipts.
+- Add tenant/scope/upload-bound short-lived capabilities, exact-origin CORS policy, adjustable allowlisted Reed-Solomon profiles, and server-side storage routes.
+- Add private file-label search plus a closed application audit vocabulary for file, access, permission, and record actions.
+- Export a strict versioned `StoredBlob` wire format and `FileGatewayClient` SDK helpers for upload, retrieval, local recovery, and semantic audit events.
 - Add immutable private human references inside sealed relay envelopes and bearer-authenticated reference search that resolves to public VOIDSCAN proof links.
 - Rebuild the private reference index only from AES-256-GCM-encrypted outbox records, without writing plaintext labels or aliases to disk.
 - Add the opt-in, metadata-only VOIDSCAN public ledger explorer and `void.scan.v1` API to the application relay.
