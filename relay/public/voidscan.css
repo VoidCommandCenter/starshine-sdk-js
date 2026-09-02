@@ -27,9 +27,7 @@ code, .label, .eyebrow, th, .tag, .button, .network-state, footer { font-family:
 .ambient-two { background: #4da887; right: -20rem; bottom: -18rem; }
 
 .site-header { height: 72px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 0 clamp(1.25rem, 4vw, 4rem); position: relative; z-index: 2; backdrop-filter: blur(14px); }
-.brand { display: flex; align-items: center; gap: .8rem; color: var(--text); text-decoration: none; letter-spacing: .12em; }
-.brand-mark { width: 34px; height: 34px; border: 1px solid var(--line-strong); color: var(--gold); display: grid; place-items: center; font-family: Georgia, serif; font-size: 1.1rem; transform: rotate(45deg); }
-.brand-mark::first-letter { transform: rotate(-45deg); }
+.brand { display: inline-flex; align-items: center; color: var(--text); text-decoration: none; letter-spacing: .12em; }
 .brand strong, .brand em { font-size: .88rem; font-style: normal; }
 .brand em { color: var(--gold); margin-left: .28rem; }
 .network-state { color: var(--muted); font-size: .66rem; letter-spacing: .12em; display: flex; align-items: center; gap: .55rem; }
