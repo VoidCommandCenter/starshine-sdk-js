@@ -98,10 +98,11 @@ function config(rateLimit = 60): RelayConfig {
 async function withServer(
   relayConfig: RelayConfig,
   run: (origin: string) => Promise<void>,
+  relayOutbox: DurableOutbox = {} as DurableOutbox,
 ): Promise<void> {
   const server = createRelayHttpServer(
     relayConfig,
-    {} as DurableOutbox,
+    relayOutbox,
     provider,
   );
   await new Promise<void>((resolve, reject) => {
@@ -144,4 +145,53 @@ test("public scan validates cursors and enforces a per-client rate limit", async
     assert.equal(limited.status, 429);
     assert.equal(limited.headers.get("retry-after"), "60");
   });
+});
+
+test("private reference search requires bearer auth and returns a public proof path", async () => {
+  const match = {
+    sourceEventId: "00000000-0000-4000-8000-000000000010",
+    sourceSystem: "hyper-nimbus",
+    eventType: "assessment.completed",
+    occurredAt: "2026-09-01T12:00:00.000Z",
+    acceptedAt: "2026-09-01T12:00:01.000Z",
+    status: "complete" as const,
+    reference: {
+      kind: "assessment",
+      externalId: "HN-1042",
+      label: "Quarterly assessment 1042",
+      aliases: ["renewal"],
+    },
+    eventId: "22d7766b-9519-4100-ac92-29b42c56f2cf",
+    ledgerId: ledger.ledgerId,
+  };
+  const privateOutbox = {
+    searchPrivateReferences: (query: string) => query === "HN-1042" ? [match] : [],
+    privateReference: (sourceEventId: string) =>
+      sourceEventId === match.sourceEventId ? match : undefined,
+  } as unknown as DurableOutbox;
+
+  await withServer(config(), async (origin) => {
+    const unauthorized = await fetch(`${origin}/v1/references?query=HN-1042`);
+    assert.equal(unauthorized.status, 401);
+
+    const headers = { authorization: "Bearer private-token" };
+    const search = await fetch(`${origin}/v1/references?query=HN-1042`, { headers });
+    assert.equal(search.status, 200);
+    const searchBody = await search.json() as {
+      references: Array<{ reference: { label: string }; publicProofPath: string }>;
+    };
+    assert.equal(searchBody.references[0]?.reference.label, "Quarterly assessment 1042");
+    assert.equal(
+      searchBody.references[0]?.publicProofPath,
+      "/scan?event=22d7766b-9519-4100-ac92-29b42c56f2cf",
+    );
+
+    const detail = await fetch(`${origin}/v1/references/${match.sourceEventId}`, { headers });
+    assert.equal(detail.status, 200);
+    const missing = await fetch(
+      `${origin}/v1/references/00000000-0000-4000-8000-000000000099`,
+      { headers },
+    );
+    assert.equal(missing.status, 404);
+  }, privateOutbox);
 });

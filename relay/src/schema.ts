@@ -15,8 +15,16 @@ export interface RelayEventEnvelope {
   eventType: string;
   occurredAt: string;
   subject?: { type: string; id: string };
+  privateReference?: RelayPrivateReference;
   data: JsonValue;
   metadata?: Record<string, JsonValue>;
+}
+
+export interface RelayPrivateReference {
+  kind: string;
+  externalId: string;
+  label: string;
+  aliases: string[];
 }
 
 export function parseRelayEvent(value: unknown): RelayEventEnvelope {
@@ -41,6 +49,9 @@ export function parseRelayEvent(value: unknown): RelayEventEnvelope {
       id: boundedString(value.subject.id, "subject.id", 256),
     };
   }
+  const privateReference = value.privateReference === undefined
+    ? undefined
+    : parsePrivateReference(value.privateReference);
   let metadata: Record<string, JsonValue> | undefined;
   if (value.metadata !== undefined) {
     if (!isRecord(value.metadata)) throw new Error("metadata must be an object");
@@ -54,8 +65,36 @@ export function parseRelayEvent(value: unknown): RelayEventEnvelope {
     eventType,
     occurredAt: new Date(occurredAtMs).toISOString(),
     subject,
+    privateReference,
     data: value.data as JsonValue,
     metadata,
+  };
+}
+
+function parsePrivateReference(value: unknown): RelayPrivateReference {
+  if (!isRecord(value)) throw new Error("privateReference must be an object");
+  const aliasesValue = value.aliases ?? [];
+  if (!Array.isArray(aliasesValue) || aliasesValue.length > 16) {
+    throw new Error("privateReference.aliases must contain at most 16 strings");
+  }
+  const aliases = aliasesValue.map((entry, index) =>
+    boundedString(entry, `privateReference.aliases[${index}]`, 256).trim()
+  );
+  const normalized = new Set<string>();
+  for (const alias of aliases) {
+    const key = searchable(alias);
+    if (normalized.has(key)) throw new Error("privateReference.aliases must be unique");
+    normalized.add(key);
+  }
+  return {
+    kind: boundedString(value.kind, "privateReference.kind", 64).trim(),
+    externalId: boundedString(
+      value.externalId,
+      "privateReference.externalId",
+      256,
+    ).trim(),
+    label: boundedString(value.label, "privateReference.label", 256).trim(),
+    aliases,
   };
 }
 
@@ -101,6 +140,10 @@ function boundedString(value: unknown, name: string, max: number): string {
     throw new Error(`${name} must be a non-empty string of at most ${max} characters`);
   }
   return value;
+}
+
+function searchable(value: string): string {
+  return value.normalize("NFKC").toLocaleLowerCase("en-US");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -252,5 +252,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeDetail();
 });
 
-Promise.all([loadLedger(), loadEvents()]).catch(showError);
+Promise.all([loadLedger(), loadEvents()])
+  .then(() => {
+    const eventId = new URLSearchParams(window.location.search).get("event");
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(eventId || "")) {
+      openDetail(eventId);
+    }
+  })
+  .catch(showError);
 setInterval(() => loadEvents({ quiet: true }), 15_000);

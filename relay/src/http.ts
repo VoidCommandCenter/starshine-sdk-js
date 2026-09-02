@@ -6,12 +6,14 @@ import {
   IdempotencyConflictError,
   type DurableOutbox,
   type LocatedRecord,
+  type PrivateReferenceMatch,
 } from "./outbox.js";
 import { parseRelayEvent } from "./schema.js";
 import type { PublicScanProvider } from "./scan.js";
 import { scanAsset } from "./scan_assets.js";
 
 const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PRIVATE_REFERENCE_API_VERSION = "void.relay.references.v1";
 const SCAN_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 export function createRelayHttpServer(
@@ -67,6 +69,30 @@ export function createRelayHttpServer(
       if (!authorized(request, config.bearerToken)) {
         response.setHeader("www-authenticate", "Bearer");
         return json(response, 401, { error: "unauthorized" });
+      }
+      if (url.pathname === "/v1/references" && request.method === "GET") {
+        const query = referenceQuery(url.searchParams.get("query"));
+        const limit = referenceLimit(url.searchParams.get("limit"));
+        return json(response, 200, {
+          version: PRIVATE_REFERENCE_API_VERSION,
+          query,
+          references: outbox.searchPrivateReferences(query, limit)
+            .map((match) => referenceView(config, match)),
+        });
+      }
+      const referenceMatch = /^\/v1\/references\/([^/]+)$/.exec(url.pathname);
+      if (referenceMatch && request.method === "GET") {
+        const sourceEventId = referenceMatch[1]!;
+        if (!EVENT_ID.test(sourceEventId)) {
+          return json(response, 400, { error: "invalid source event ID" });
+        }
+        const match = outbox.privateReference(sourceEventId);
+        return match
+          ? json(response, 200, {
+            version: PRIVATE_REFERENCE_API_VERSION,
+            reference: referenceView(config, match),
+          })
+          : json(response, 404, { error: "private reference not found" });
       }
       if (url.pathname === "/v1/events" && request.method === "POST") {
         const body = await readJson(request, config.maxEventBytes);
@@ -151,6 +177,40 @@ function scanCursor(raw: string | null): string {
   if (raw === null || raw === "") return "";
   if (!/^[1-9][0-9]{0,19}$/.test(raw)) throw new Error("invalid scan cursor");
   return raw;
+}
+
+function referenceQuery(raw: string | null): string {
+  const value = raw?.trim() ?? "";
+  if (!value || value.length > 256) {
+    throw new Error("reference query must contain between 1 and 256 characters");
+  }
+  return value;
+}
+
+function referenceLimit(raw: string | null): number {
+  if (raw === null || raw === "") return 25;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 100) {
+    throw new Error("reference limit must be an integer between 1 and 100");
+  }
+  return value;
+}
+
+function referenceView(config: RelayConfig, match: PrivateReferenceMatch): unknown {
+  return {
+    sourceEventId: match.sourceEventId,
+    sourceSystem: match.sourceSystem,
+    eventType: match.eventType,
+    occurredAt: match.occurredAt,
+    acceptedAt: match.acceptedAt,
+    status: match.status,
+    reference: match.reference,
+    eventId: match.eventId,
+    ledgerId: match.ledgerId,
+    publicProofPath: config.scanEnabled && match.eventId
+      ? `/scan?event=${encodeURIComponent(match.eventId)}`
+      : undefined,
+  };
 }
 
 function authorized(request: IncomingMessage, token: string | undefined): boolean {

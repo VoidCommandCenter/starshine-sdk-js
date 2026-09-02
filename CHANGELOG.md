@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add immutable private human references inside sealed relay envelopes and bearer-authenticated reference search that resolves to public VOIDSCAN proof links.
+- Rebuild the private reference index only from AES-256-GCM-encrypted outbox records, without writing plaintext labels or aliases to disk.
 - Add the opt-in, metadata-only VOIDSCAN public ledger explorer and `void.scan.v1` API to the application relay.
 - Publish verified two-level checkpoint proofs while withholding tenant identities, request metadata, balances, filenames, and encrypted payloads.
 - Add public scan rate limiting, incremental newest-first indexing, proof caching, and restrictive browser security headers.
