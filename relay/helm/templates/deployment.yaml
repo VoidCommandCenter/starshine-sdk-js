@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: starshine-relay
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: starshine-relay
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: relay
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.http.port }}
+          env:
+            - name: STARSHINE_SERVER
+              value: {{ required "starshine.server is required" .Values.starshine.server | quote }}
+            - name: STARSHINE_LEDGER_ID
+              value: {{ required "starshine.ledgerId is required" .Values.starshine.ledgerId | quote }}
+            - name: STARSHINE_WALLET_FILE
+              value: /run/secrets/starshine/wallet.json
+            - name: STARSHINE_RELAY_BEARER_TOKEN_FILE
+              value: /run/secrets/starshine/bearer-token
+            - name: STARSHINE_RELAY_DATA_DIR
+              value: /var/lib/starshine-relay
+            - name: STARSHINE_RELAY_OUTBOX_KEY_FILE
+              value: /run/secrets/starshine/outbox-key
+            - name: STARSHINE_RELAY_HOST
+              value: {{ .Values.http.host | quote }}
+            - name: STARSHINE_RELAY_PORT
+              value: {{ .Values.http.port | quote }}
+            - name: STARSHINE_RELAY_MAX_ATTEMPTS
+              value: {{ .Values.outbox.maxAttempts | quote }}
+            - name: STARSHINE_RELAY_RETRY_BASE_MS
+              value: {{ .Values.outbox.retryBaseMs | quote }}
+            {{- if .Values.amqp.enabled }}
+            - name: STARSHINE_RELAY_AMQP_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.amqp.existingSecret }}
+                  key: {{ .Values.amqp.urlSecretKey }}
+            - name: STARSHINE_RELAY_AMQP_QUEUE
+              value: {{ required "amqp.queue is required when AMQP is enabled" .Values.amqp.queue | quote }}
+            - name: STARSHINE_RELAY_AMQP_PREFETCH
+              value: {{ .Values.amqp.prefetch | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: outbox
+              mountPath: /var/lib/starshine-relay
+            - name: secrets
+              mountPath: /run/secrets/starshine/wallet.json
+              subPath: {{ .Values.starshine.walletSecretKey }}
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/starshine/bearer-token
+              subPath: {{ .Values.http.bearerTokenSecretKey }}
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/starshine/outbox-key
+              subPath: {{ .Values.outbox.encryptionKeySecretKey }}
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          resources:
+{{ toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: outbox
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-outbox
+        - name: secrets
+          secret:
+            secretName: {{ .Values.starshine.existingSecret }}
+        - name: tmp
+          emptyDir: {}

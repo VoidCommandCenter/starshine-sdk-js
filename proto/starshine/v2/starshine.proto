@@ -28,7 +28,16 @@ service Storage {
 service Ledger {
   rpc GetEvent(GetEventRequest) returns (GetEventResponse);
   rpc ListAccountEvents(ListAccountEventsRequest) returns (ListAccountEventsResponse);
+  rpc ListLedgerEvents(ListLedgerEventsRequest) returns (ListLedgerEventsResponse);
   rpc GetInclusionProof(GetInclusionProofRequest) returns (GetInclusionProofResponse);
+}
+
+service LedgerAdmin {
+  rpc CreateLedger(CreateLedgerRequest) returns (LedgerDescriptorResponse);
+  rpc GrantSigner(GrantLedgerSignerRequest) returns (LedgerDescriptorResponse);
+  rpc RevokeSigner(RevokeLedgerSignerRequest) returns (LedgerDescriptorResponse);
+  rpc SetLedgerActive(SetLedgerActiveRequest) returns (LedgerDescriptorResponse);
+  rpc GetLedger(GetLedgerDescriptorRequest) returns (LedgerDescriptorResponse);
 }
 
 enum Operation {
@@ -41,6 +50,16 @@ enum Operation {
   OPERATION_READ_EVENT = 6;
   OPERATION_LIST_EVENTS = 7;
   OPERATION_GET_INCLUSION_PROOF = 8;
+  OPERATION_LIST_LEDGER_EVENTS = 9;
+}
+
+enum LedgerAdminOperation {
+  LEDGER_ADMIN_OPERATION_UNSPECIFIED = 0;
+  LEDGER_ADMIN_OPERATION_CREATE = 1;
+  LEDGER_ADMIN_OPERATION_GRANT_SIGNER = 2;
+  LEDGER_ADMIN_OPERATION_REVOKE_SIGNER = 3;
+  LEDGER_ADMIN_OPERATION_SET_ACTIVE = 4;
+  LEDGER_ADMIN_OPERATION_GET = 5;
 }
 
 enum ReceiptDisposition {
@@ -55,8 +74,11 @@ enum Finality {
   FINALITY_UNSPECIFIED = 0;
   // Initial onboarding: one node durably recorded and attested the event.
   FINALITY_NODE_ATTESTED = 1;
-  // Future VOID network: event is included in a finalized checkpoint.
-  FINALITY_NETWORK_CHECKPOINTED = 2;
+  // Event is included in a node-attested shared-ledger checkpoint. This is
+  // durable inclusion evidence, but not yet distributed-network consensus.
+  FINALITY_LEDGER_CHECKPOINTED = 2;
+  // Reserved for a future checkpoint finalized by the VOID network.
+  FINALITY_NETWORK_FINALIZED = 3;
 }
 
 message GetCapabilitiesRequest {}
@@ -72,12 +94,15 @@ message GetCapabilitiesResponse {
   repeated Finality supported_finality = 8;
   bytes node_id = 9;
   bytes node_mldsa_public_key = 10;
+  bool application_ledgers = 11;
+  bool checkpoint_inclusion_proofs = 12;
+  bytes ledger_admin_mldsa_public_key = 13;
 }
 
 // Canonical operation fields signed by the caller with ML-DSA-65. The signed
 // bytes are the ASCII domain "starshine:operation:v2\0" followed by RFC 8785
-// canonical JSON for fields 1-11 (byte strings are unpadded base64url).
-// Signature fields are excluded.
+// canonical JSON for the semantic fields 1-11 plus ledger_id (byte strings
+// are unpadded base64url). Signature fields are excluded.
 message OperationAuthorization {
   uint32 version = 1;
   Operation operation = 2;
@@ -92,6 +117,7 @@ message OperationAuthorization {
   bytes nonce = 11;
   bytes mldsa_public_key = 12;
   bytes mldsa_signature = 13;
+  string ledger_id = 14;
 }
 
 message SealedArtifact {
@@ -166,6 +192,9 @@ message EventReceipt {
   Finality finality = 15;
   NodeAttestation node_attestation = 16;
   InclusionProof inclusion_proof = 17;
+  string ledger_id = 18;
+  uint64 ledger_sequence = 19;
+  bytes previous_ledger_event_hash = 20;
 }
 
 message NodeAttestation {
@@ -194,6 +223,17 @@ message ListAccountEventsResponse {
   string next_cursor = 2;
 }
 
+message ListLedgerEventsRequest {
+  OperationAuthorization authorization = 1;
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListLedgerEventsResponse {
+  repeated EventReceipt receipts = 1;
+  string next_cursor = 2;
+}
+
 message GetInclusionProofRequest {
   OperationAuthorization authorization = 1;
   string event_id = 2;
@@ -207,9 +247,69 @@ message InclusionProof {
   bytes checkpoint_root = 1;
   uint64 checkpoint_height = 2;
   repeated bytes merkle_path = 3;
-  bytes checkpoint_certificate = 4;
+  CheckpointCertificate checkpoint_certificate = 4;
   Finality finality = 5;
+  string ledger_id = 6;
+  bytes event_hash = 7;
+  uint64 ledger_sequence = 8;
+  bytes ledger_root = 9;
+  uint64 ledger_event_count = 10;
+  repeated MerkleSibling ledger_path = 11;
+  bytes ledger_commitment = 12;
+  uint64 event_index = 13;
+  uint64 ledger_count = 14;
+  repeated MerkleSibling global_path = 15;
+  string event_id = 16;
+  uint64 ledger_index = 17;
 }
+
+message MerkleSibling {
+  bytes hash = 1;
+  bool sibling_on_left = 2;
+}
+
+message CheckpointCertificate {
+  uint32 version = 1;
+  uint64 checkpoint_height = 2;
+  uint64 created_at_unix_ms = 3;
+  bytes global_root = 4;
+  bytes previous_checkpoint_hash = 5;
+  bytes checkpoint_hash = 6;
+  bytes node_id = 7;
+  bytes node_mldsa_public_key = 8;
+  bytes node_mldsa_signature = 9;
+}
+
+message LedgerAdminAuthorization {
+  uint32 version = 1;
+  LedgerAdminOperation operation = 2;
+  string request_id = 3;
+  string ledger_id = 4;
+  bytes signer_actor_id = 5;
+  string display_name = 6;
+  string environment = 7;
+  bool active = 8;
+  uint64 issued_at_unix_ms = 9;
+  bytes nonce = 10;
+  bytes mldsa_public_key = 11;
+  bytes mldsa_signature = 12;
+}
+
+message LedgerDescriptor {
+  string ledger_id = 1;
+  string display_name = 2;
+  string environment = 3;
+  bool active = 4;
+  uint64 created_at_unix_ms = 5;
+  repeated bytes authorized_signer_actor_ids = 6;
+}
+
+message CreateLedgerRequest { LedgerAdminAuthorization authorization = 1; }
+message GrantLedgerSignerRequest { LedgerAdminAuthorization authorization = 1; }
+message RevokeLedgerSignerRequest { LedgerAdminAuthorization authorization = 1; }
+message SetLedgerActiveRequest { LedgerAdminAuthorization authorization = 1; }
+message GetLedgerDescriptorRequest { LedgerAdminAuthorization authorization = 1; }
+message LedgerDescriptorResponse { LedgerDescriptor ledger = 1; }
 
 message PublicArtifact {
   bytes artifact_root = 1;

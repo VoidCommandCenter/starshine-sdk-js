@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.0-alpha.3
+
+- Add opaque per-application ledgers with independent signer authorization and lifecycle controls.
+- Add ledger-wide sequence/hash chains alongside per-actor chains.
+- Add signed two-level inclusion proofs: event to application root to shared VOID checkpoint root.
+- Add ML-DSA-authenticated ledger provisioning and signer grant/revoke SDK calls.
+- Add the standalone HTTP/RabbitMQ relay with durable sealed-artifact retries and Kubernetes assets.
+
 ## 2.0.0-alpha.2
 
 - Switch high-level storage operations to authenticated `starshine.v2` append/retrieve/release.

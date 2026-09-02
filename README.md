@@ -4,14 +4,14 @@ Post-quantum client-side sealing, resilient storage, public storage audits, and 
 
 The SDK keeps plaintext and private keys in the application process. Data is compressed, encrypted with hybrid X-Wing HPKE, Reed-Solomon encoded, replica-sealed, and committed with BAO before it reaches a storage node. Operations are authorized with ML-DSA-65.
 
-> v2 alpha: authenticated append/retrieve/release, durable idempotency, scoped event history, owner enforcement, and ML-DSA node receipts are implemented in the SDK and the matching Rust node branch. `FINALITY_NODE_ATTESTED` is one-node durability, not future VOID network consensus.
+> v2 alpha: authenticated application ledgers, durable idempotency, append-only history, owner enforcement, two-level checkpoint inclusion proofs, and ML-DSA receipts are implemented in the SDK and matching Rust node. `LedgerCheckpointed` is node-attested shared-ledger inclusion, not future VOID network consensus.
 
 Requires Node.js 22 or newer.
 
 ## Install
 
 ```bash
-npm install github:VoidCommandCenter/starshine-sdk-js#v2.0.0-alpha.2
+npm install github:VoidCommandCenter/starshine-sdk-js#v2.0.0-alpha.3
 ```
 
 ## Connect securely
@@ -23,6 +23,7 @@ import { Starshine, createRequestId } from "starshine-sdk-js";
 
 const starshine = await Starshine.connect({
   server: "grpcs://starshine.example.com:443",
+  ledgerId: "018f9f4c-4c83-7f1d-8e5d-e0d646f48d8a", // issued by VOID
   keys: "./keys.json",
   transport: {
     // Optional: private CA, mTLS key/certificate, or bearer token.
@@ -38,6 +39,7 @@ Plaintext gRPC is accepted automatically on loopback. A remote plaintext endpoin
 ```ts
 const legacy = await Starshine.connect({
   server: "grpc://legacy-node.example.com:50051",
+  ledgerId: process.env.STARSHINE_LEDGER_ID,
   transport: { allowInsecureRemote: true },
 });
 ```
@@ -96,16 +98,30 @@ const released = await starshine.delete(stored.contentHash, {
 console.log(released.physicalBytesReleased);
 ```
 
-History is authenticated and scoped to the wallet:
+Actor history is authenticated and scoped to the wallet and application ledger:
 
 ```ts
 const { receipts, nextCursor } = await starshine.events(100);
 ```
 
+The application-ledger feed spans every signer VOID has authorized for that app:
+
+```ts
+const ledgerPage = await starshine.ledgerEvents(100);
+const proof = await starshine.inclusionProof(ledgerPage.receipts[0].eventId);
+// inclusionProof() verifies event -> app root -> shared VOID root and the
+// ML-DSA checkpoint certificate before returning.
+```
+
+Each deployment receives a permanent opaque `ledgerId`; use distinct IDs for development, staging, and production. Ledger IDs delineate histories and authorization even though their commitments share a global VOID checkpoint.
+
 ## Wallet
 
 ```ts
-const starshine = await Starshine.connect({ server: "grpcs://node.example.com" });
+const starshine = await Starshine.connect({
+  server: "grpcs://node.example.com",
+  ledgerId: process.env.STARSHINE_LEDGER_ID,
+});
 await starshine.saveWallet("./keys.json");
 ```
 
@@ -118,6 +134,7 @@ All unary calls have a 30-second deadline by default. Set a client default or ov
 ```ts
 const starshine = await Starshine.connect({
   server: "grpcs://node.example.com",
+  ledgerId: process.env.STARSHINE_LEDGER_ID,
   rpcTimeoutMs: 60_000,
 });
 
@@ -135,12 +152,16 @@ npm ci
 npm run typecheck
 npm test
 npm run build
+npm --workspace @void/starshine-relay test
 ```
 
 The mutating public-node test is intentionally separate:
 
 ```bash
-STARSHINE_E2E_SERVER=grpc://127.0.0.1:50051 npm run test:e2e
+STARSHINE_E2E_SERVER=grpc://127.0.0.1:50051 \
+STARSHINE_E2E_LEDGER_ID=<provisioned-uuid> \
+STARSHINE_E2E_WALLET=./application.wallet.json \
+npm run test:e2e
 ```
 
 ## Security boundaries
@@ -148,7 +169,7 @@ STARSHINE_E2E_SERVER=grpc://127.0.0.1:50051 npm run test:e2e
 - The Rust node disables legacy v1 services by default. Enabling them is an explicit migration exception and restores their weaker semantics.
 - Exact append retries return the original signed receipt unchanged; they do not create a second event or store a second artifact.
 - Physical release is not event deletion. Event records and public non-secret artifact metadata remain.
-- `FINALITY_NODE_ATTESTED` means one node recorded an event. It is not future VOID network consensus.
+- `NodeAttested` means one node recorded an event. `LedgerCheckpointed` adds verifiable shared-ledger inclusion. Neither is future distributed VOID consensus (`NetworkFinalized`).
 - Independent-provider sovereignty requires independently operated nodes; synthetic provider identifiers do not demonstrate it.
 
-The normative migration requirements are in [`docs/PROTOCOL_V2.md`](./docs/PROTOCOL_V2.md). The Starshine and VOID whitepapers remain architectural guides rather than frozen implementation specifications.
+The implemented contract is in [`docs/PROTOCOL_V2.md`](./docs/PROTOCOL_V2.md), operator provisioning is in [`docs/OPERATIONS.md`](./docs/OPERATIONS.md), and the relay handoff is in [`relay/README.md`](./relay/README.md). The Starshine and VOID whitepapers remain architectural guides rather than frozen implementation specifications.
