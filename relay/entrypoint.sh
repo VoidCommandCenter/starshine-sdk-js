@@ -2,8 +2,9 @@
 set -eu
 
 secret_dir=/run/secrets/starshine
+relay_data_dir=${STARSHINE_RELAY_DATA_DIR:-/var/lib/starshine-relay}
 umask 077
-mkdir -p "$secret_dir"
+mkdir -p "$secret_dir" "$relay_data_dir"
 
 if [ -n "${STARSHINE_WALLET_JSON:-}" ]; then
     if [ -n "${STARSHINE_WALLET_FILE:-}" ]; then
@@ -40,6 +41,11 @@ fi
 
 if [ -z "${STARSHINE_RELAY_PORT:-}" ] && [ -n "${PORT:-}" ]; then
     export STARSHINE_RELAY_PORT="$PORT"
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+    chown -R node:node "$secret_dir" "$relay_data_dir"
+    exec gosu node "$@"
 fi
 
 exec "$@"
