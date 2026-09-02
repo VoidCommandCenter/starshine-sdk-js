@@ -39,6 +39,17 @@ if [ -n "${STARSHINE_RELAY_BEARER_TOKEN:-}" ]; then
     unset STARSHINE_RELAY_BEARER_TOKEN
 fi
 
+if [ -n "${STARSHINE_SERVER_CA_PEM:-}" ]; then
+    if [ -n "${STARSHINE_SERVER_CA_FILE:-}" ]; then
+        echo "configure STARSHINE_SERVER_CA_PEM or STARSHINE_SERVER_CA_FILE, not both" >&2
+        exit 1
+    fi
+    server_ca_path="$secret_dir/server-ca.pem"
+    printf '%s' "$STARSHINE_SERVER_CA_PEM" > "$server_ca_path"
+    export STARSHINE_SERVER_CA_FILE="$server_ca_path"
+    unset STARSHINE_SERVER_CA_PEM
+fi
+
 if [ -z "${STARSHINE_RELAY_PORT:-}" ] && [ -n "${PORT:-}" ]; then
     export STARSHINE_RELAY_PORT="$PORT"
 fi

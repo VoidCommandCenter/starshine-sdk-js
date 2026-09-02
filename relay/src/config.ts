@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 export interface RelayConfig {
   server: string;
+  serverCa?: Uint8Array;
   ledgerId: string;
   walletFile: string;
   dataDir: string;
@@ -21,6 +22,11 @@ export interface RelayConfig {
 
 export async function loadConfig(): Promise<RelayConfig> {
   const server = required("STARSHINE_SERVER");
+  const serverCaFile = process.env.STARSHINE_SERVER_CA_FILE?.trim();
+  const serverCa = serverCaFile ? new Uint8Array(await readFile(serverCaFile)) : undefined;
+  if (serverCaFile && serverCa?.length === 0) {
+    throw new Error("STARSHINE_SERVER_CA_FILE is empty");
+  }
   const ledgerId = required("STARSHINE_LEDGER_ID");
   const walletFile = required("STARSHINE_WALLET_FILE");
   const dataDir = process.env.STARSHINE_RELAY_DATA_DIR ?? "/var/lib/starshine-relay";
@@ -41,6 +47,7 @@ export async function loadConfig(): Promise<RelayConfig> {
   }
   return {
     server,
+    serverCa,
     ledgerId,
     walletFile,
     dataDir,

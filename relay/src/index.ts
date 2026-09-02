@@ -22,7 +22,9 @@ const outbox = new DurableOutbox(config.dataDir, config.outboxKey);
 await outbox.initialize();
 const wallet = await loadWallet(config.walletFile);
 const keys = await loadKeysFromJson(wallet, getXWingKem());
-const capabilities = await getCapabilitiesV2(config.server);
+const capabilities = await getCapabilitiesV2(config.server, {
+  transport: serverTransport(config),
+});
 const expectedNode = {
   nodeId: capabilities.nodeId,
   publicKey: capabilities.nodeMlDsaPublicKey,
@@ -95,6 +97,7 @@ async function runWorker(
           ledgerId: relayConfig.ledgerId,
           requestId: record.envelope.sourceEventId,
           expectedNode: trustedNode,
+          transport: serverTransport(relayConfig),
         },
       );
       await relayOutbox.complete(record, serializableResult(result.receipt, result.artifactRoot));
@@ -110,6 +113,10 @@ async function runWorker(
       }
     }
   }
+}
+
+function serverTransport(config: RelayConfig): { rootCertificates: Uint8Array } | undefined {
+  return config.serverCa ? { rootCertificates: config.serverCa } : undefined;
 }
 
 function serializableResult(receipt: EventReceipt, artifactRoot: Uint8Array): unknown {
