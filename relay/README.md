@@ -47,6 +47,18 @@ Recommended:
 
 RabbitMQ is enabled when both `STARSHINE_RELAY_AMQP_URL` and `STARSHINE_RELAY_AMQP_QUEUE` are present. Use an `amqps://` URL in production. Messages are acknowledged only after the normalized envelope is on the durable outbox.
 
+## Railway
+
+Build from the repository root with `RAILWAY_DOCKERFILE_PATH=relay/Dockerfile`, attach a persistent volume at `/var/lib/starshine-relay`, set `STARSHINE_RELAY_HOST=0.0.0.0`, and use `/healthz` as the healthcheck path.
+
+Railway-managed secret values can be supplied without committing secret files:
+
+- `STARSHINE_WALLET_JSON` contains the complete application wallet JSON.
+- `STARSHINE_RELAY_OUTBOX_KEY` contains a 32-byte key encoded as 64 hex digits or unpadded base64url.
+- `STARSHINE_RELAY_BEARER_TOKEN` contains the inbound HTTP bearer token.
+
+The container entrypoint writes these values to mode-`0600` files under `/run/secrets/starshine`, exports the existing `*_FILE` settings, removes the value variables from the relay process environment, and then starts the worker. Do not put these files on the persistent outbox volume. The mounted-file settings remain the preferred interface for Kubernetes and other secret-volume platforms.
+
 ## Retry and failure behavior
 
 Every pending, prepared, completed, and dead outbox record is encrypted with AES-256-GCM under the mounted outbox key. AES-256 retains a 128-bit security margin against generic quantum search. Keep and back up this key for as long as the outbox volume must remain readable.
