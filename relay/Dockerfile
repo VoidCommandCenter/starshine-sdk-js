@@ -20,10 +20,12 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /workspace/dist ./dist
 COPY --from=build /workspace/proto ./proto
 COPY --from=build /workspace/relay/dist ./relay/dist
+COPY --chmod=755 relay/entrypoint.sh ./relay/entrypoint.sh
 
 RUN mkdir -p /var/lib/starshine-relay /run/secrets/starshine \
     && chown -R node:node /var/lib/starshine-relay /run/secrets/starshine /app
 
 USER node
 EXPOSE 8787
+ENTRYPOINT ["/app/relay/entrypoint.sh"]
 CMD ["node", "relay/dist/index.js"]
