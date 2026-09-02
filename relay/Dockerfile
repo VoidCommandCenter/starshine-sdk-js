@@ -14,6 +14,9 @@ FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY relay/package.json ./relay/
 RUN npm ci --omit=dev && npm cache clean --force
@@ -25,7 +28,6 @@ COPY --chmod=755 relay/entrypoint.sh ./relay/entrypoint.sh
 RUN mkdir -p /var/lib/starshine-relay /run/secrets/starshine \
     && chown -R node:node /var/lib/starshine-relay /run/secrets/starshine /app
 
-USER node
 EXPOSE 8787
 ENTRYPOINT ["/app/relay/entrypoint.sh"]
 CMD ["node", "relay/dist/index.js"]

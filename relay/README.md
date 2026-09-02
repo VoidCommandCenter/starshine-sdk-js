@@ -51,6 +51,8 @@ RabbitMQ is enabled when both `STARSHINE_RELAY_AMQP_URL` and `STARSHINE_RELAY_AM
 
 Build from the repository root with `RAILWAY_DOCKERFILE_PATH=relay/Dockerfile`, attach a persistent volume at `/var/lib/starshine-relay`, set `STARSHINE_RELAY_HOST=0.0.0.0`, and use `/healthz` as the healthcheck path.
 
+The container starts only long enough as root to initialize Railway's mounted volume and its runtime-secret directory, then drops permanently to the unprivileged `node` user before starting the relay.
+
 Railway-managed secret values can be supplied without committing secret files:
 
 - `STARSHINE_WALLET_JSON` contains the complete application wallet JSON.
