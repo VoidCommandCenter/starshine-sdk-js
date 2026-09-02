@@ -8,6 +8,8 @@ import { Starshine } from "starshine-sdk-js";
 const KEYS = "./keys.json";
 const SERVER =
   process.env.STARSHINE_SERVER ?? "http://127.0.0.1:50051";
+const LEDGER_ID = process.env.STARSHINE_LEDGER_ID;
+if (!LEDGER_ID) throw new Error("STARSHINE_LEDGER_ID is required");
 
 async function fileExists(path: string): Promise<boolean> {
   try {
@@ -20,6 +22,7 @@ async function fileExists(path: string): Promise<boolean> {
 
 const ss = await Starshine.connect({
   server: SERVER,
+  ledgerId: LEDGER_ID,
   keys: (await fileExists(KEYS)) ? KEYS : undefined,
 });
 if (!(await fileExists(KEYS))) {

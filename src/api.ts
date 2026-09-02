@@ -48,6 +48,7 @@ import {
   getInclusionProofV2,
   getPublicArtifactV2,
   listAccountEventsV2,
+  listLedgerEventsV2,
   releaseV2,
   requestStorageProofV2,
   retrieveV2,
@@ -59,6 +60,8 @@ import {
 export interface StarshineOptions {
   /** gRPC endpoint. Use `grpcs://` for every non-local production endpoint. */
   server?: string;
+  /** Opaque application-ledger UUID provisioned by the VOID operator. */
+  ledgerId?: string;
   /** Wallet JSON object, or path to a keys file. Omit to generate in memory. */
   keys?: WalletFile | string;
   dataShards?: number;
@@ -170,6 +173,7 @@ function parseHash(hash: string | Uint8Array): Uint8Array {
  */
 export class Starshine {
   readonly server: string;
+  readonly ledgerId: string;
   readonly dataShards: number;
   readonly parityShards: number;
   readonly transport: Readonly<TransportOptions>;
@@ -191,6 +195,7 @@ export class Starshine {
 
   private constructor(
     server: string,
+    ledgerId: string,
     wallet: WalletFile,
     dataShards: number,
     parityShards: number,
@@ -198,6 +203,7 @@ export class Starshine {
     rpcTimeoutMs: number,
   ) {
     this.server = server;
+    this.ledgerId = ledgerId;
     this.wallet = wallet;
     this.dataShards = dataShards;
     this.parityShards = parityShards;
@@ -207,6 +213,12 @@ export class Starshine {
 
   static async connect(options: StarshineOptions = {}): Promise<Starshine> {
     const server = options.server ?? process.env.STARSHINE_SERVER ?? DEFAULT_SERVER;
+    const ledgerId = options.ledgerId ?? process.env.STARSHINE_LEDGER_ID;
+    if (!ledgerId) {
+      throw new Error(
+        "ledgerId is required (set StarshineOptions.ledgerId or STARSHINE_LEDGER_ID)",
+      );
+    }
     const dataShards = options.dataShards ?? DEFAULT_DATA_SHARDS;
     const parityShards = options.parityShards ?? DEFAULT_PARITY_SHARDS;
     const transport = options.transport ?? {};
@@ -225,6 +237,7 @@ export class Starshine {
     }
     const starshine = new Starshine(
       server,
+      ledgerId,
       wallet,
       dataShards,
       parityShards,
@@ -312,6 +325,28 @@ export class Starshine {
       cursor,
       {
         transport: this.transport,
+        ledgerId: this.ledgerId,
+        rpc: this.request(options).rpc,
+        requestId: options.requestId,
+        expectedNode: this.trustedNode,
+      },
+    );
+  }
+
+  /** All events committed to this application ledger, across authorized signers. */
+  async ledgerEvents(
+    limit = 100,
+    cursor = "",
+    options: RequestOptions = {},
+  ): Promise<{ receipts: EventReceipt[]; nextCursor: string }> {
+    return listLedgerEventsV2(
+      this.server,
+      this.wallet,
+      limit,
+      cursor,
+      {
+        ledgerId: this.ledgerId,
+        transport: this.transport,
         rpc: this.request(options).rpc,
         requestId: options.requestId,
         expectedNode: this.trustedNode,
@@ -325,9 +360,11 @@ export class Starshine {
     options: RequestOptions = {},
   ): Promise<InclusionProof> {
     return getInclusionProofV2(this.server, this.wallet, eventId, {
+      ledgerId: this.ledgerId,
       transport: this.transport,
       rpc: this.request(options).rpc,
       requestId: options.requestId,
+      expectedNode: this.trustedNode,
     });
   }
 
@@ -404,6 +441,7 @@ export class Starshine {
       fileName,
       logical,
       {
+        ledgerId: this.ledgerId,
         transport: this.transport,
         rpc: this.request(options).rpc,
         requestId: options.requestId,
@@ -428,6 +466,7 @@ export class Starshine {
       contentHash,
       minimumShards,
       {
+        ledgerId: this.ledgerId,
         transport: this.transport,
         rpc: this.request(options).rpc,
         requestId: options.requestId,
@@ -451,6 +490,7 @@ export class Starshine {
       contentHash,
       options.reason ?? "owner requested release",
       {
+        ledgerId: this.ledgerId,
         transport: this.transport,
         rpc: this.request(options).rpc,
         requestId: options.requestId,

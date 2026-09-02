@@ -1,0 +1,39 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/voidcommandcenter/starshine-relay
+  tag: latest
+  pullPolicy: IfNotPresent
+
+starshine:
+  server: grpcs://api.void.gs:443
+  ledgerId: ""
+  existingSecret: starshine-relay-secrets
+  walletSecretKey: wallet.json
+
+http:
+  host: 0.0.0.0
+  port: 8787
+  bearerTokenSecretKey: bearer-token
+
+amqp:
+  enabled: false
+  existingSecret: starshine-relay-secrets
+  urlSecretKey: amqp-url
+  queue: ""
+  prefetch: 16
+
+outbox:
+  storageClass: ""
+  size: 10Gi
+  encryptionKeySecretKey: outbox-key
+  maxAttempts: 20
+  retryBaseMs: 1000
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 4Gi

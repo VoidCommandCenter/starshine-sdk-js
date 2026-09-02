@@ -1,0 +1,6 @@
+apiVersion: v2
+name: starshine-relay
+description: VOID-owned durable relay for Starshine application ledgers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

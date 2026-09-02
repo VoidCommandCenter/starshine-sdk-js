@@ -1,7 +1,10 @@
 {
   "name": "starshine-sdk-js",
-  "version": "2.0.0-alpha.2",
+  "version": "2.0.0-alpha.3",
   "private": false,
+  "workspaces": [
+    "relay"
+  ],
   "type": "module",
   "description": "Post-quantum JavaScript SDK for Starshine storage, public audits, and VOID receipts.",
   "license": "MIT",

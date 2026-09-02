@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     return;
   }
   if (values.version) {
-    console.log("starshine-sdk-js 2.0.0-alpha.1");
+    console.log("starshine-sdk-js 2.0.0-alpha.3");
     return;
   }
 

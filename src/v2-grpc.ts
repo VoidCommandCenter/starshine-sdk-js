@@ -60,10 +60,26 @@ export interface V2LedgerClient {
     },
     { receipts: V2EventReceiptWire[]; next_cursor: string }
   >;
+  listLedgerEvents: Unary<
+    {
+      authorization?: V2AuthorizationWire;
+      limit: number;
+      cursor: string;
+    },
+    { receipts: V2EventReceiptWire[]; next_cursor: string }
+  >;
   getInclusionProof: Unary<
     { authorization?: V2AuthorizationWire; event_id: string },
     { proof?: V2InclusionProofWire }
   >;
+}
+
+export interface V2LedgerAdminClient {
+  createLedger: Unary<{ authorization?: V2LedgerAdminAuthorizationWire }, V2LedgerDescriptorResponseWire>;
+  grantSigner: Unary<{ authorization?: V2LedgerAdminAuthorizationWire }, V2LedgerDescriptorResponseWire>;
+  revokeSigner: Unary<{ authorization?: V2LedgerAdminAuthorizationWire }, V2LedgerDescriptorResponseWire>;
+  setLedgerActive: Unary<{ authorization?: V2LedgerAdminAuthorizationWire }, V2LedgerDescriptorResponseWire>;
+  getLedger: Unary<{ authorization?: V2LedgerAdminAuthorizationWire }, V2LedgerDescriptorResponseWire>;
 }
 
 export interface V2AuthorizationWire {
@@ -80,6 +96,7 @@ export interface V2AuthorizationWire {
   nonce: Buffer;
   mldsa_public_key: Buffer;
   mldsa_signature: Buffer;
+  ledger_id: string;
 }
 
 export interface V2SealedShardWire {
@@ -146,8 +163,37 @@ export interface V2InclusionProofWire {
   checkpoint_root: Buffer;
   checkpoint_height: string;
   merkle_path: Buffer[];
-  checkpoint_certificate: Buffer;
+  checkpoint_certificate?: V2CheckpointCertificateWire;
   finality: number;
+  ledger_id: string;
+  event_hash: Buffer;
+  ledger_sequence: string;
+  ledger_root: Buffer;
+  ledger_event_count: string;
+  ledger_path: V2MerkleSiblingWire[];
+  ledger_commitment: Buffer;
+  event_index: string;
+  ledger_count: string;
+  global_path: V2MerkleSiblingWire[];
+  event_id: string;
+  ledger_index: string;
+}
+
+export interface V2MerkleSiblingWire {
+  hash: Buffer;
+  sibling_on_left: boolean;
+}
+
+export interface V2CheckpointCertificateWire {
+  version: number;
+  checkpoint_height: string;
+  created_at_unix_ms: string;
+  global_root: Buffer;
+  previous_checkpoint_hash: Buffer;
+  checkpoint_hash: Buffer;
+  node_id: Buffer;
+  node_mldsa_public_key: Buffer;
+  node_mldsa_signature: Buffer;
 }
 
 export interface V2EventReceiptWire {
@@ -168,6 +214,9 @@ export interface V2EventReceiptWire {
   finality: number;
   node_attestation?: V2NodeAttestationWire;
   inclusion_proof?: V2InclusionProofWire;
+  ledger_id: string;
+  ledger_sequence: string;
+  previous_ledger_event_hash: Buffer;
 }
 
 export interface V2CapabilitiesWire {
@@ -181,6 +230,37 @@ export interface V2CapabilitiesWire {
   supported_finality: number[];
   node_id: Buffer;
   node_mldsa_public_key: Buffer;
+  application_ledgers: boolean;
+  checkpoint_inclusion_proofs: boolean;
+  ledger_admin_mldsa_public_key: Buffer;
+}
+
+export interface V2LedgerAdminAuthorizationWire {
+  version: number;
+  operation: number;
+  request_id: string;
+  ledger_id: string;
+  signer_actor_id: Buffer;
+  display_name: string;
+  environment: string;
+  active: boolean;
+  issued_at_unix_ms: string;
+  nonce: Buffer;
+  mldsa_public_key: Buffer;
+  mldsa_signature: Buffer;
+}
+
+export interface V2LedgerDescriptorWire {
+  ledger_id: string;
+  display_name: string;
+  environment: string;
+  active: boolean;
+  created_at_unix_ms: string;
+  authorized_signer_actor_ids: Buffer[];
+}
+
+export interface V2LedgerDescriptorResponseWire {
+  ledger?: V2LedgerDescriptorWire;
 }
 
 export interface V2PublicArtifactWire {
@@ -225,6 +305,7 @@ interface V2Clients {
   system: V2SystemClient;
   storage: V2StorageClient;
   ledger: V2LedgerClient;
+  ledgerAdmin: V2LedgerAdminClient;
 }
 
 const cache = new Map<string, V2Clients>();
@@ -259,6 +340,7 @@ function load(endpoint: string, transport: TransportOptions): V2Clients {
         System: new (address: string, credentials: grpc.ChannelCredentials, options: object) => V2SystemClient;
         Storage: new (address: string, credentials: grpc.ChannelCredentials, options: object) => V2StorageClient;
         Ledger: new (address: string, credentials: grpc.ChannelCredentials, options: object) => V2LedgerClient;
+        LedgerAdmin: new (address: string, credentials: grpc.ChannelCredentials, options: object) => V2LedgerAdminClient;
       };
     };
   };
@@ -274,6 +356,7 @@ function load(endpoint: string, transport: TransportOptions): V2Clients {
     system: new pkg.System(parsed.address, credentials, options),
     storage: new pkg.Storage(parsed.address, credentials, options),
     ledger: new pkg.Ledger(parsed.address, credentials, options),
+    ledgerAdmin: new pkg.LedgerAdmin(parsed.address, credentials, options),
   };
 }
 
