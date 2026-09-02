@@ -41,6 +41,7 @@ Required:
 Recommended:
 
 - `STARSHINE_RELAY_BEARER_TOKEN_FILE`, a mounted token file
+- `STARSHINE_SERVER_CA_FILE`, a PEM trust root when the Starshine API uses a private deployment CA
 - `STARSHINE_RELAY_DATA_DIR`, default `/var/lib/starshine-relay`; this must be persistent storage
 - `STARSHINE_RELAY_HOST`, default `127.0.0.1`
 - `STARSHINE_RELAY_PORT`, default `8787`
@@ -58,6 +59,7 @@ Railway-managed secret values can be supplied without committing secret files:
 - `STARSHINE_WALLET_JSON` contains the complete application wallet JSON.
 - `STARSHINE_RELAY_OUTBOX_KEY` contains a 32-byte key encoded as 64 hex digits or unpadded base64url.
 - `STARSHINE_RELAY_BEARER_TOKEN` contains the inbound HTTP bearer token.
+- `STARSHINE_SERVER_CA_PEM` contains the optional Starshine API trust root in PEM form.
 
 The container entrypoint writes these values to mode-`0600` files under `/run/secrets/starshine`, exports the existing `*_FILE` settings, removes the value variables from the relay process environment, and then starts the worker. Do not put these files on the persistent outbox volume. The mounted-file settings remain the preferred interface for Kubernetes and other secret-volume platforms.
 
