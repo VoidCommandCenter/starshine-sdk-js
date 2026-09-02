@@ -15,6 +15,7 @@ import { deserializeStoredBlob, jsonForStorage, serializeStoredBlob } from "./co
 import { loadConfig, type RelayConfig } from "./config.js";
 import { createRelayHttpServer } from "./http.js";
 import { DurableOutbox } from "./outbox.js";
+import { StarshinePublicScan } from "./scan.js";
 import { canonicalEventBytes } from "./schema.js";
 
 const config = await loadConfig();
@@ -29,10 +30,13 @@ const expectedNode = {
   nodeId: capabilities.nodeId,
   publicKey: capabilities.nodeMlDsaPublicKey,
 };
+const publicScan = config.scanEnabled
+  ? new StarshinePublicScan(config, wallet, expectedNode)
+  : undefined;
 
 let stopping = false;
 const worker = runWorker(config, outbox, wallet, keys, expectedNode);
-const http = createRelayHttpServer(config, outbox);
+const http = createRelayHttpServer(config, outbox, publicScan);
 await new Promise<void>((resolve, reject) => {
   http.once("error", reject);
   http.listen(config.port, config.host, () => resolve());
@@ -46,6 +50,7 @@ console.log(JSON.stringify({
   ledgerId: config.ledgerId,
   nodeId: Buffer.from(capabilities.nodeId).toString("hex"),
   amqp: Boolean(amqp),
+  publicScan: config.scanEnabled,
 }));
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

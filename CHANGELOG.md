@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add the opt-in, metadata-only VOIDSCAN public ledger explorer and `void.scan.v1` API to the application relay.
+- Publish verified two-level checkpoint proofs while withholding tenant identities, request metadata, balances, filenames, and encrypted payloads.
+- Add public scan rate limiting, incremental newest-first indexing, proof caching, and restrictive browser security headers.
+
 ## 2.0.0-alpha.3
 
 - Add opaque per-application ledgers with independent signer authorization and lifecycle controls.

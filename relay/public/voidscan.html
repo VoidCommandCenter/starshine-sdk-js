@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="description" content="VOID Starshine public ledger proof explorer" />
+    <title>VOIDSCAN · Starshine Ledger</title>
+    <link rel="stylesheet" href="/scan/voidscan.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+    <header class="site-header">
+      <a class="brand" href="/scan/" aria-label="VOIDSCAN home">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <span><strong>VOID</strong><em>SCAN</em></span>
+      </a>
+      <div class="network-state"><span class="pulse"></span> LIVE PROOF INDEX</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">STARSHINE APPLICATION LEDGER</p>
+          <h1 id="ledger-name">Loading ledger…</h1>
+          <p class="hero-copy">
+            Public commitments and post-quantum checkpoint evidence. Application payloads remain encrypted and are never exposed here.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <span id="environment" class="tag">—</span>
+          <span class="tag verified">ML-DSA VERIFIED</span>
+        </div>
+      </section>
+
+      <section class="ledger-id-card" aria-label="Ledger identity">
+        <div>
+          <span class="label">LEDGER ID</span>
+          <code id="ledger-id">—</code>
+        </div>
+        <button id="copy-ledger" class="icon-button" type="button">COPY</button>
+      </section>
+
+      <div id="error" class="error" role="alert" hidden></div>
+
+      <section class="stats" aria-label="Ledger statistics">
+        <article>
+          <span class="label">LEDGER EVENTS</span>
+          <strong id="event-count">—</strong>
+        </article>
+        <article>
+          <span class="label">LATEST SEQUENCE</span>
+          <strong id="latest-sequence">—</strong>
+        </article>
+        <article>
+          <span class="label">INDEX STATUS</span>
+          <strong class="status-good">LIVE</strong>
+        </article>
+        <article>
+          <span class="label">PAYLOAD VISIBILITY</span>
+          <strong>ENCRYPTED</strong>
+        </article>
+      </section>
+
+      <section class="explorer">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">CANONICAL HISTORY</p>
+            <h2>Ledger events</h2>
+          </div>
+          <div class="toolbar">
+            <label class="search">
+              <span class="sr-only">Search loaded events</span>
+              <input id="search" type="search" autocomplete="off" placeholder="Search event, hash, operation…" />
+            </label>
+            <button id="refresh" class="button secondary" type="button">REFRESH</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>SEQUENCE</th>
+                <th>OPERATION</th>
+                <th>EVENT ID</th>
+                <th>EVENT HASH</th>
+                <th>ACCEPTED</th>
+                <th>PROOF</th>
+              </tr>
+            </thead>
+            <tbody id="events"></tbody>
+          </table>
+          <div id="empty" class="empty" hidden>No matching ledger events.</div>
+        </div>
+        <div class="load-row">
+          <span id="indexed-at" class="muted">—</span>
+          <button id="load-more" class="button secondary" type="button" hidden>LOAD EARLIER</button>
+        </div>
+      </section>
+    </main>
+
+    <aside id="detail" class="detail" aria-hidden="true">
+      <button id="detail-backdrop" class="detail-backdrop" type="button" aria-label="Close event details"></button>
+      <div class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+        <div class="detail-header">
+          <div>
+            <p class="eyebrow">VERIFIED EVENT</p>
+            <h2 id="detail-title">Proof detail</h2>
+          </div>
+          <button id="close-detail" class="close-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="detail-loading" class="detail-loading">Verifying checkpoint proof…</div>
+        <div id="detail-content" hidden>
+          <div id="proof-banner" class="proof-banner">
+            <span class="proof-icon">✓</span>
+            <div><strong>Checkpoint proof verified</strong><small>Event → application ledger → VOID checkpoint</small></div>
+          </div>
+          <section class="detail-section">
+            <h3>Event</h3>
+            <dl id="event-detail"></dl>
+          </section>
+          <section class="detail-section">
+            <h3>Inclusion proof</h3>
+            <dl id="proof-detail"></dl>
+          </section>
+          <section class="detail-section">
+            <h3>ML-DSA checkpoint certificate</h3>
+            <dl id="certificate-detail"></dl>
+          </section>
+          <p class="privacy-note">No actor identity, request metadata, balance, filename, or application payload is published by VOIDSCAN.</p>
+        </div>
+      </div>
+    </aside>
+
+    <footer>
+      <span>VOID COMMAND CENTER</span>
+      <span>PUBLIC PROOF METADATA · <code>void.scan.v1</code></span>
+    </footer>
+    <script type="module" src="/scan/voidscan.js"></script>
+  </body>
+</html>
