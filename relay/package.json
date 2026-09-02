@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/schema.test.ts src/outbox.test.ts src/scan.test.ts src/http.test.ts",
+    "test": "tsx --test src/capability.test.ts src/file_catalog.test.ts src/file_gateway.test.ts src/schema.test.ts src/outbox.test.ts src/scan.test.ts src/http.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

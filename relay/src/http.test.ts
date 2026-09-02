@@ -3,6 +3,8 @@ import type { AddressInfo } from "node:net";
 import test from "node:test";
 
 import type { RelayConfig } from "./config.js";
+import { FileCapabilityAuthority } from "./capability.js";
+import type { FileGateway, FilePrincipal } from "./file_gateway.js";
 import { createRelayHttpServer } from "./http.js";
 import type { DurableOutbox } from "./outbox.js";
 import type { PublicScanProvider } from "./scan.js";
@@ -91,6 +93,15 @@ function config(rateLimit = 60): RelayConfig {
     retryBaseMs: 10,
     dataShards: 1,
     parityShards: 1,
+    gatewayEnabled: false,
+    gatewayMaxChunkBytes: 8 * 1024 * 1024,
+    gatewayMaxFileBytes: 1024 * 1024 * 1024,
+    gatewayMaxChunks: 10_000,
+    gatewayMaxJsonBytes: 128 * 1024 * 1024,
+    gatewayCapabilityTtlSeconds: 900,
+    gatewayAllowedShardPolicies: new Set(["1+1"]),
+    gatewayAllowedOrigins: new Set(),
+    gatewayDefaultRouteId: "void-primary",
     amqpPrefetch: 1,
   };
 }
@@ -99,11 +110,15 @@ async function withServer(
   relayConfig: RelayConfig,
   run: (origin: string) => Promise<void>,
   relayOutbox: DurableOutbox = {} as DurableOutbox,
+  gateway?: FileGateway,
+  capabilities?: FileCapabilityAuthority,
 ): Promise<void> {
   const server = createRelayHttpServer(
     relayConfig,
     relayOutbox,
     provider,
+    gateway,
+    capabilities,
   );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -133,6 +148,70 @@ test("public scan is readable without the private relay bearer token", async () 
     const privateResponse = await fetch(`${origin}/v1/events/${ledger.ledgerId}`);
     assert.equal(privateResponse.status, 401);
   });
+});
+
+test("file routes require scoped capabilities and exact CORS origins", async () => {
+  const relayConfig = config();
+  relayConfig.gatewayEnabled = true;
+  relayConfig.gatewayAllowedOrigins = new Set(["https://app.example.test"]);
+  const authority = new FileCapabilityAuthority(relayConfig.outboxKey, 900);
+  let principal: FilePrincipal | undefined;
+  const gateway = {
+    create: async (_body: unknown, value: FilePrincipal) => {
+      principal = value;
+      return { version: "void.file-upload.v1", uploadId: "00000000-0000-4000-8000-000000000001" };
+    },
+  } as unknown as FileGateway;
+
+  await withServer(relayConfig, async (origin) => {
+    const mintedResponse = await fetch(`${origin}/v1/capabilities`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer private-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        subject: "user-pseudonym",
+        tenantId: "hyper-nimbus",
+        scopes: ["files:create"],
+      }),
+    });
+    assert.equal(mintedResponse.status, 201);
+    const minted = await mintedResponse.json() as { token: string };
+    const uploadBody = JSON.stringify({
+      version: "void.file-upload.v1",
+      sourceSystem: "hyper-nimbus",
+      mode: "gateway-sealed",
+      fileName: "evidence.pdf",
+      contentType: "application/pdf",
+      byteLength: 1,
+      privateReference: { kind: "evidence", externalId: "HN-1", label: "Evidence", aliases: [] },
+    });
+    const allowed = await fetch(`${origin}/v1/files/uploads`, {
+      method: "POST",
+      headers: {
+        authorization: `VoidCapability ${minted.token}`,
+        "content-type": "application/json",
+        origin: "https://app.example.test",
+      },
+      body: uploadBody,
+    });
+    assert.equal(allowed.status, 201);
+    assert.equal(allowed.headers.get("access-control-allow-origin"), "https://app.example.test");
+    assert.equal(principal?.tenantId, "hyper-nimbus");
+    assert.equal(principal?.service, false);
+
+    const denied = await fetch(`${origin}/v1/files/uploads`, {
+      method: "POST",
+      headers: {
+        authorization: `VoidCapability ${minted.token}`,
+        "content-type": "application/json",
+        origin: "https://evil.example.test",
+      },
+      body: uploadBody,
+    });
+    assert.equal(denied.status, 401);
+  }, {} as DurableOutbox, gateway, authority);
 });
 
 test("public scan validates cursors and enforces a per-client rate limit", async () => {

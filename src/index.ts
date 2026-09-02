@@ -141,3 +141,23 @@ export {
   DEFAULT_KEYS_PATH,
   PROGRESS_LINE_PREFIX,
 } from "./constants.js";
+export {
+  SERIALIZED_STORED_BLOB_VERSION,
+  serializeStoredBlob,
+  deserializeStoredBlob,
+  type SerializedStoredBlob,
+  type DeserializeStoredBlobOptions,
+} from "./serialized.js";
+export {
+  FILE_UPLOAD_VERSION,
+  CLIENT_SEALED_CHUNK_VERSION,
+  FILE_AUDIT_EVENT_TYPES,
+  FileGatewayClient,
+  type FileAuditEventType,
+  type FileSealingMode,
+  type FilePrivateReference,
+  type FileShardPolicy,
+  type CreateFileUpload,
+  type FileUploadView,
+  type FileGatewayClientOptions,
+} from "./file-gateway.js";

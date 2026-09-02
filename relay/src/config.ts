@@ -19,6 +19,16 @@ export interface RelayConfig {
   retryBaseMs: number;
   dataShards: number;
   parityShards: number;
+  gatewayEnabled: boolean;
+  gatewayMaxChunkBytes: number;
+  gatewayMaxFileBytes: number;
+  gatewayMaxChunks: number;
+  gatewayMaxJsonBytes: number;
+  gatewayCapabilityTtlSeconds: number;
+  gatewayAllowedShardPolicies: ReadonlySet<string>;
+  gatewayAllowedOrigins: ReadonlySet<string>;
+  gatewayDefaultRouteId: string;
+  gatewayRoutesFile?: string;
   amqpUrl?: string;
   amqpQueue?: string;
   amqpPrefetch: number;
@@ -49,6 +59,14 @@ export async function loadConfig(): Promise<RelayConfig> {
   if (!!amqpUrl !== !!amqpQueue) {
     throw new Error("STARSHINE_RELAY_AMQP_URL and STARSHINE_RELAY_AMQP_QUEUE must be set together");
   }
+  const dataShards = integer("STARSHINE_RELAY_DATA_SHARDS", 4, 1, 255);
+  const parityShards = integer("STARSHINE_RELAY_PARITY_SHARDS", 2, 1, 255);
+  if (dataShards + parityShards > 255) {
+    throw new Error("STARSHINE_RELAY_DATA_SHARDS + STARSHINE_RELAY_PARITY_SHARDS must not exceed 255");
+  }
+  const gatewayAllowedShardPolicies = shardPolicies(
+    process.env.STARSHINE_GATEWAY_ALLOWED_SHARD_POLICIES ?? `${dataShards}+${parityShards}`,
+  );
   return {
     server,
     serverCa,
@@ -66,12 +84,65 @@ export async function loadConfig(): Promise<RelayConfig> {
     maxEventBytes: integer("STARSHINE_RELAY_MAX_EVENT_BYTES", 1024 * 1024, 1, 64 * 1024 * 1024),
     maxAttempts: integer("STARSHINE_RELAY_MAX_ATTEMPTS", 20, 1, 10_000),
     retryBaseMs: integer("STARSHINE_RELAY_RETRY_BASE_MS", 1_000, 10, 3_600_000),
-    dataShards: integer("STARSHINE_RELAY_DATA_SHARDS", 4, 1, 255),
-    parityShards: integer("STARSHINE_RELAY_PARITY_SHARDS", 2, 1, 255),
+    dataShards,
+    parityShards,
+    gatewayEnabled: boolean("STARSHINE_GATEWAY_ENABLED", false),
+    gatewayMaxChunkBytes: integer(
+      "STARSHINE_GATEWAY_MAX_CHUNK_BYTES",
+      8 * 1024 * 1024,
+      1,
+      64 * 1024 * 1024,
+    ),
+    gatewayMaxFileBytes: integer(
+      "STARSHINE_GATEWAY_MAX_FILE_BYTES",
+      1024 * 1024 * 1024,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    gatewayMaxChunks: integer("STARSHINE_GATEWAY_MAX_CHUNKS", 10_000, 1, 1_000_000),
+    gatewayMaxJsonBytes: integer(
+      "STARSHINE_GATEWAY_MAX_JSON_BYTES",
+      128 * 1024 * 1024,
+      1,
+      1024 * 1024 * 1024,
+    ),
+    gatewayCapabilityTtlSeconds: integer(
+      "STARSHINE_GATEWAY_CAPABILITY_TTL_SECONDS",
+      900,
+      1,
+      3600,
+    ),
+    gatewayAllowedShardPolicies,
+    gatewayAllowedOrigins: origins(process.env.STARSHINE_GATEWAY_ALLOWED_ORIGINS),
+    gatewayDefaultRouteId: process.env.STARSHINE_GATEWAY_DEFAULT_ROUTE_ID?.trim() || "void-primary",
+    gatewayRoutesFile: process.env.STARSHINE_GATEWAY_ROUTES_FILE?.trim() || undefined,
     amqpUrl,
     amqpQueue,
     amqpPrefetch: integer("STARSHINE_RELAY_AMQP_PREFETCH", 16, 1, 10_000),
   };
+}
+
+function shardPolicies(raw: string): ReadonlySet<string> {
+  const policies = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  if (policies.length < 1) throw new Error("STARSHINE_GATEWAY_ALLOWED_SHARD_POLICIES must not be empty");
+  for (const policy of policies) {
+    const match = /^([1-9][0-9]{0,2})\+([1-9][0-9]{0,2})$/.exec(policy);
+    if (!match || Number(match[1]) + Number(match[2]) > 255) {
+      throw new Error(`invalid gateway shard policy ${policy}`);
+    }
+  }
+  return new Set(policies);
+}
+
+function origins(raw: string | undefined): ReadonlySet<string> {
+  const values = raw?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
+  for (const value of values) {
+    const parsed = new URL(value);
+    if (parsed.origin !== value || (parsed.protocol !== "https:" && parsed.hostname !== "localhost")) {
+      throw new Error(`invalid gateway CORS origin ${value}`);
+    }
+  }
+  return new Set(values);
 }
 
 function required(name: string): string {

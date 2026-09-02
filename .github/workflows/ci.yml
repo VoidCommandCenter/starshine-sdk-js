@@ -22,4 +22,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm --workspace @void/starshine-relay test
+      - run: npm --workspace @void/starshine-relay run typecheck
+      - run: npm --workspace @void/starshine-relay run build
       - run: npm pack --dry-run
