@@ -29,6 +29,16 @@ HTTP endpoints:
 
 Every other HTTP endpoint requires `Authorization: Bearer …` when a token file is configured. A non-loopback listener refuses to start without that file.
 
+## Public VOIDSCAN
+
+The relay can publish a metadata-only, read-only proof explorer without exposing its bearer-protected ingestion API. Set `STARSHINE_RELAY_SCAN_ENABLED=true`, then open `/scan` on the relay hostname. The versioned public API is:
+
+- `GET /v1/scan/ledger` — public ledger identity and privacy policy.
+- `GET /v1/scan/events?limit=50&cursor=…` — newest-first sanitized event commitments.
+- `GET /v1/scan/events/{eventId}` — a cryptographically verified two-level checkpoint inclusion proof.
+
+VOIDSCAN deliberately omits the actor ID, request ID and digest, logical content ID, balance, filename, application envelope, and encrypted artifact bytes. It publishes only canonical event/checkpoint commitments and the ML-DSA checkpoint evidence required for independent verification. Public scan calls are rate-limited, recent list results are indexed in memory, and immutable event proofs are cached.
+
 ## Configuration
 
 Required:
@@ -42,6 +52,10 @@ Recommended:
 
 - `STARSHINE_RELAY_BEARER_TOKEN_FILE`, a mounted token file
 - `STARSHINE_SERVER_CA_FILE`, a PEM trust root when the Starshine API uses a private deployment CA
+- `STARSHINE_RELAY_SCAN_ENABLED`, default `false`; explicitly opts the configured ledger into public proof metadata
+- `STARSHINE_RELAY_SCAN_TITLE`, public application/ledger display name
+- `STARSHINE_RELAY_SCAN_ENVIRONMENT`, public environment label such as `staging` or `production`
+- `STARSHINE_RELAY_SCAN_RATE_LIMIT`, public API requests per client per minute, default `60`
 - `STARSHINE_RELAY_DATA_DIR`, default `/var/lib/starshine-relay`; this must be persistent storage
 - `STARSHINE_RELAY_HOST`, default `127.0.0.1`
 - `STARSHINE_RELAY_PORT`, default `8787`

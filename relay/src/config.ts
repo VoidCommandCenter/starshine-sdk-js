@@ -10,6 +10,10 @@ export interface RelayConfig {
   host: string;
   port: number;
   bearerToken?: string;
+  scanEnabled: boolean;
+  scanTitle: string;
+  scanEnvironment: string;
+  scanRateLimitPerMinute: number;
   maxEventBytes: number;
   maxAttempts: number;
   retryBaseMs: number;
@@ -55,6 +59,10 @@ export async function loadConfig(): Promise<RelayConfig> {
     host,
     port: integer("STARSHINE_RELAY_PORT", 8787, 1, 65_535),
     bearerToken,
+    scanEnabled: boolean("STARSHINE_RELAY_SCAN_ENABLED", false),
+    scanTitle: process.env.STARSHINE_RELAY_SCAN_TITLE?.trim() || "VOID application ledger",
+    scanEnvironment: process.env.STARSHINE_RELAY_SCAN_ENVIRONMENT?.trim() || "unspecified",
+    scanRateLimitPerMinute: integer("STARSHINE_RELAY_SCAN_RATE_LIMIT", 60, 1, 10_000),
     maxEventBytes: integer("STARSHINE_RELAY_MAX_EVENT_BYTES", 1024 * 1024, 1, 64 * 1024 * 1024),
     maxAttempts: integer("STARSHINE_RELAY_MAX_ATTEMPTS", 20, 1, 10_000),
     retryBaseMs: integer("STARSHINE_RELAY_RETRY_BASE_MS", 1_000, 10, 3_600_000),
@@ -79,6 +87,14 @@ function integer(name: string, fallback: number, minimum: number, maximum: numbe
     throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
   }
   return value;
+}
+
+function boolean(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (raw === undefined || raw === "") return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 function isLoopback(host: string): boolean {
